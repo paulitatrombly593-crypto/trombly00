@@ -11,6 +11,32 @@ if (!appElement) {
   throw new Error('[Critical Error] #app 엘리먼트를 찾을 수 없습니다.');
 }
 
+// 뷰 모드 관리 (PC vs Mobile)
+type ViewMode = 'pc' | 'mobile';
+const VIEW_MODE_STORAGE_KEY = 'MY_ANKI_VIEW_MODE';
+
+function getSavedViewMode(): ViewMode {
+  const saved = localStorage.getItem(VIEW_MODE_STORAGE_KEY) as ViewMode;
+  if (saved === 'pc' || saved === 'mobile') {
+    return saved;
+  }
+  // 초기 접속 시 화면 너비로 스마트 감지 (640px 이하면 모바일 모드 기본)
+  return window.innerWidth <= 640 ? 'mobile' : 'pc';
+}
+
+let currentViewMode: ViewMode = getSavedViewMode();
+let isSettingsModalOpen = false;
+
+function applyViewMode(mode: ViewMode): void {
+  currentViewMode = mode;
+  localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  document.body.classList.remove('mode-pc', 'mode-mobile');
+  document.body.classList.add(`mode-${mode}`);
+}
+
+// 초기 모드 적용
+applyViewMode(currentViewMode);
+
 let selectedDeckId: string | null = null;
 let studyingDeckId: string | null = null;
 let studyQueue: Card[] = [];
@@ -28,14 +54,11 @@ function setKeyboardListener(handler: (e: KeyboardEvent) => void): void {
 }
 
 /**
- * 엑셀 파일의 인코딩(EUC-KR 또는 UTF-8)을 자동 감지하여 한글 깨짐을 원천 방지하는 리더
+ * EUC-KR 및 UTF-8 자동 판별 리더
  */
 async function readFileWithAutoEncoding(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
-  // 1차 시도: UTF-8 디코딩
   const utf8Text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
-  
-  // 만약 특수 깨짐 문자(U+FFFD )가 포함되어 있다면 한국 엑셀 표준인 EUC-KR로 재디코딩
   if (utf8Text.includes('\uFFFD')) {
     try {
       const euckrDecoder = new TextDecoder('euc-kr');
@@ -48,11 +71,79 @@ async function readFileWithAutoEncoding(file: File): Promise<string> {
 }
 
 /**
+ * ⚙️ 설정 모달 렌더링 헬퍼
+ */
+function renderSettingsModalHtml(): string {
+  if (!isSettingsModalOpen) return '';
+
+  return `
+    <div class="modal-overlay" id="settings-modal-overlay">
+      <div class="modal-content" onclick="event.stopPropagation();">
+        <h3 style="margin-top: 0; font-size: 18px; display: flex; align-items: center; gap: 8px;">
+          ⚙️ 환경 설정
+        </h3>
+        <p style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
+          원하시는 디스플레이 환경을 선택하세요. 선택 즉시 최적화된 레이아웃으로 변경됩니다.
+        </p>
+
+        <div class="radio-group">
+          <label class="radio-option">
+            <input type="radio" name="view-mode" value="pc" ${currentViewMode === 'pc' ? 'checked' : ''} />
+            <div>
+              <strong style="font-size: 14px;">💻 PC 모드 (데스크톱 최적화)</strong>
+              <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+                넓은 화면, 가로 배치 폼, 키보드 단축키 안내 표시
+              </div>
+            </div>
+          </label>
+
+          <label class="radio-option">
+            <input type="radio" name="view-mode" value="mobile" ${currentViewMode === 'mobile' ? 'checked' : ''} />
+            <div>
+              <strong style="font-size: 14px;">📱 모바일 모드 (스마트폰 최적화)</strong>
+              <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+                컴팩트 폭, 세로 스택 입력폼, 큼직한 터치 2x2 버튼
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+          <button id="btn-close-settings" class="btn-primary" style="padding: 10px 18px;">확인 및 닫기</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function attachSettingsModalEvents(): void {
+  const overlay = document.getElementById('settings-modal-overlay');
+  const closeBtn = document.getElementById('btn-close-settings');
+
+  const closeModal = () => {
+    isSettingsModalOpen = false;
+    render();
+  };
+
+  overlay?.addEventListener('click', closeModal);
+  closeBtn?.addEventListener('click', closeModal);
+
+  // 라디오 버튼 변경 이벤트 (둘 중 하나만 선택)
+  document.querySelectorAll<HTMLInputElement>('input[name="view-mode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      if (target.checked) {
+        applyViewMode(target.value as ViewMode);
+      }
+    });
+  });
+}
+
+/**
  * 1. 메인 대시보드 화면
  */
 async function renderDashboard(): Promise<void> {
   const data = await api.getStorageData();
-  const isElectron = 'ankiAPI' in window;
 
   let totalCardsCount = 0;
   let totalDueTodayCount = 0;
@@ -92,11 +183,14 @@ async function renderDashboard(): Promise<void> {
       <div class="header">
         <div>
           <h2 style="margin: 0; font-size: 20px;">🧠 My Anki 단어장</h2>
-          <div style="margin-top: 4px;">
-            <span class="badge">${isElectron ? '🖥️ 데스크톱 모드' : '📱 모바일 웹 모드'}</span>
+          <div style="margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+            <span class="badge" style="cursor: pointer;" id="badge-toggle-mode">
+              ${currentViewMode === 'pc' ? '💻 PC 모드' : '📱 모바일 모드'} (클릭하여 변경)
+            </span>
           </div>
         </div>
-        <div style="display: flex; gap: 6px;">
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button id="btn-open-settings" class="btn-secondary" style="font-size: 13px; padding: 8px 12px;">⚙️ 설정</button>
           <button id="btn-export-json" class="btn-secondary" style="font-size: 12px; padding: 8px 10px;">📥 백업</button>
           <label class="btn-secondary" style="font-size: 12px; padding: 8px 10px; cursor: pointer; display: inline-flex; align-items: center;">
             📤 복원
@@ -135,7 +229,18 @@ async function renderDashboard(): Promise<void> {
         ${deckListHtml || '<p style="color: #94a3b8; font-size: 14px;">아직 단어장이 없습니다.</p>'}
       </div>
     </div>
+    ${renderSettingsModalHtml()}
   `;
+
+  // 설정 모달 열기
+  const openModal = () => {
+    isSettingsModalOpen = true;
+    render();
+  };
+  document.getElementById('btn-open-settings')?.addEventListener('click', openModal);
+  document.getElementById('badge-toggle-mode')?.addEventListener('click', openModal);
+
+  attachSettingsModalEvents();
 
   document.getElementById('btn-create-deck')?.addEventListener('click', async () => {
     const input = document.getElementById('input-deck-name') as HTMLInputElement;
@@ -217,7 +322,7 @@ async function renderDashboard(): Promise<void> {
 }
 
 /**
- * 2. 단어 관리 화면 (모바일 최적화 & EUC-KR 한글 완벽 복구)
+ * 2. 특정 단어장의 단어 관리 화면
  */
 async function renderDeckManage(deckId: string): Promise<void> {
   const data = await api.getStorageData();
@@ -243,7 +348,10 @@ async function renderDeckManage(deckId: string): Promise<void> {
     <div class="container">
       <div class="header">
         <h3 style="margin: 0; font-size: 18px; word-break: break-all;">📁 [${escapeHtml(deck.name)}]</h3>
-        <button id="btn-back" class="btn-secondary" style="font-size: 13px; padding: 8px 12px; flex-shrink: 0;">⬅ 목록으로</button>
+        <div style="display: flex; gap: 6px; flex-shrink: 0;">
+          <button id="btn-open-settings" class="btn-secondary" style="font-size: 13px; padding: 8px 10px;">⚙️ 설정</button>
+          <button id="btn-back" class="btn-secondary" style="font-size: 13px; padding: 8px 12px;">⬅ 목록</button>
+        </div>
       </div>
 
       <div class="card-box">
@@ -269,14 +377,20 @@ async function renderDeckManage(deckId: string): Promise<void> {
         ${cardRowsHtml || '<p style="color: #94a3b8; font-size: 14px;">등록된 카드가 없습니다.</p>'}
       </div>
     </div>
+    ${renderSettingsModalHtml()}
   `;
+
+  document.getElementById('btn-open-settings')?.addEventListener('click', () => {
+    isSettingsModalOpen = true;
+    render();
+  });
+  attachSettingsModalEvents();
 
   document.getElementById('btn-back')?.addEventListener('click', () => {
     selectedDeckId = null;
     render();
   });
 
-  // 잘못 들어간 깨진 단어 전체 정리용 버튼
   document.getElementById('btn-clear-deck-cards')?.addEventListener('click', async () => {
     if (confirm('이 단어장의 모든 카드를 삭제하고 다시 등록하시겠습니까?')) {
       for (const c of [...deck.cards]) {
@@ -294,7 +408,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
     await render();
   });
 
-  // 한글 깨짐 방지 디코더가 적용된 CSV 대량 등록
   const csvInput = document.getElementById('input-csv-file') as HTMLInputElement;
   csvInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
