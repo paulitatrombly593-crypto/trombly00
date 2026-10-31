@@ -34,6 +34,18 @@ let settings: AnkiSettings = loadSettings();
 let activeSettingsTab: SettingsTab = 'new';
 let isSettingsModalOpen = false;
 let isAllCardsModalOpen = false; // 📚 전체 카드 '창 안에 창' 모달 상태
+let isQuitConfirmModalOpen = false; // 🛑 학습 종료 확인 모달 상태
+
+// 스크롤할 때만 스크롤바를 보여주고 1초 뒤 숨기는 글로벌 감지기
+let scrollHideTimer: number | null = null;
+window.addEventListener('scroll', () => {
+  document.body.classList.add('is-scrolling');
+  if (scrollHideTimer) clearTimeout(scrollHideTimer);
+  scrollHideTimer = window.setTimeout(() => {
+    document.body.classList.remove('is-scrolling');
+  }, 1000);
+}, true);
+
 let currentSubPage: SubPageMode = 'none'; // 🔥 오늘 할당량 / ⭐ 중요 표시 전용 페이지 상태
 
 let starredCardIds: Set<string> = new Set(JSON.parse(localStorage.getItem(STARRED_CARDS_KEY) || '[]'));
@@ -1085,6 +1097,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
       const lastReviewedStr = SM2Scheduler.formatLastReviewed(card);
       const m = getCardMasteryInfo(card);
 
+      const isStar = starredCardIds.has(card.id);
       return `
         <div class="deck-item">
           <div style="flex: 1; min-width: 0;">
@@ -1094,7 +1107,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
               ${card.isLeech ? `<span class="tag-badge tag-leech">🩸 거머리(${card.lapses}회 실패)</span>` : ''}
             </div>
             <div style="word-break: break-all; font-size: 15px;">
-              ${starredCardIds.has(card.id) ? '⭐ ' : ''}<strong>Q:</strong> ${escapeHtml(card.front)}
+              <strong>Q:</strong> ${escapeHtml(card.front)}
             </div>
             <div style="color: #60a5fa; margin-top: 3px; word-break: break-all; font-size: 14px;">
               <strong>A:</strong> ${escapeHtml(card.back)}
@@ -1103,7 +1116,12 @@ async function renderDeckManage(deckId: string): Promise<void> {
               🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b> · 수준: <b>${m.levelText}</b>
             </div>
           </div>
-          <button class="btn-danger btn-delete-card" data-card-id="${card.id}" style="flex-shrink: 0;">삭제</button>
+          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+            <button class="btn-manage-star" data-card-id="${card.id}" title="중요 단어 별표" style="background: transparent; font-size: 24px; padding: 4px 8px; color: ${isStar ? '#84cc16' : 'var(--text-secondary)'};">
+              ${isStar ? '★' : '☆'}
+            </button>
+            <button class="btn-danger btn-delete-card" data-card-id="${card.id}">삭제</button>
+          </div>
         </div>
       `;
     })
@@ -1143,6 +1161,21 @@ async function renderDeckManage(deckId: string): Promise<void> {
       </div>
     </div>
     ${renderSettingsModalHtml()}
+    ${isQuitConfirmModalOpen ? `
+      <div class="modal-overlay" id="quit-confirm-overlay">
+        <div class="modal-content" style="max-width: 360px; text-align: center;" onclick="event.stopPropagation();">
+          <div style="font-size: 38px; margin-bottom: 8px;">⏸️</div>
+          <h3 style="margin: 0 0 8px 0; font-size: 18px;">학습을 종료하시겠습니까?</h3>
+          <p style="font-size: 13.5px; color: var(--text-secondary); margin: 0 0 22px 0;">
+            지금까지 학습한 카드 기록은 안전하게 저장됩니다.<br>(창 바깥의 빈 공간을 누르면 학습으로 돌아갑니다)
+          </p>
+          <div style="display: flex; gap: 10px;">
+            <button id="btn-cancel-quit" class="btn-secondary" style="flex: 1; padding: 13px;">계속 학습하기</button>
+            <button id="btn-confirm-quit" class="btn-danger" style="flex: 1; padding: 13px; font-size: 14px;">종료하기</button>
+          </div>
+        </div>
+      </div>
+    ` : ''}
   `;
 
   document.getElementById('btn-open-settings')?.addEventListener('click', () => {
@@ -1207,6 +1240,13 @@ async function renderDeckManage(deckId: string): Promise<void> {
     });
   });
 }
+
+  document.querySelectorAll<HTMLButtonElement>('.btn-manage-star').forEach(btn => {
+    btn.addEventListener('click', () => {
+      toggleStarCard(btn.dataset.cardId!);
+      render();
+    });
+  });
 
 // =========================================================
 // 3. 플래시카드 학습룸 (일반 SM-2 모드 + ⭐ 별표 전용 순수 암기 모드 겸용)
@@ -1339,17 +1379,33 @@ async function renderStudyRoom(): Promise<void> {
   });
   attachSettingsModalEvents();
 
-  const quitStudy = () => {
+  // 학습 화면에서는 드래그(스와이프)로 실수로 나가지지 않도록 리스너 완전 해제!
+  clearSwipeListener();
+
+  // X 버튼을 누르면 바로 나가지 않고 확인 상자 오픈
+  document.getElementById('btn-quit-study')?.addEventListener('click', () => {
+    triggerHaptic(12);
+    isQuitConfirmModalOpen = true;
+    render();
+  });
+
+  // 확인 상자 바깥 빈 공간 클릭 또는 [계속 학습하기] 클릭 시 취소 및 복귀
+  const cancelQuit = () => {
+    isQuitConfirmModalOpen = false;
+    render();
+  };
+  document.getElementById('quit-confirm-overlay')?.addEventListener('click', cancelQuit);
+  document.getElementById('btn-cancel-quit')?.addEventListener('click', cancelQuit);
+
+  // [종료하기] 버튼 클릭 시 실제로 학습 종료
+  document.getElementById('btn-confirm-quit')?.addEventListener('click', () => {
+    isQuitConfirmModalOpen = false;
     stopCardTimer();
-    clearSwipeListener();
     window.speechSynthesis?.cancel();
     studyingDeckId = null;
     isStarCramMode = false;
     render();
-  };
-
-  document.getElementById('btn-quit-study')?.addEventListener('click', quitStudy);
-  attachSwipeBackListener(quitStudy);
+  });
 
   document.getElementById('btn-star-card')?.addEventListener('click', (e) => {
     e.stopPropagation();

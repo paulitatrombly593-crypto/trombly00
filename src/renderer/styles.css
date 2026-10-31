@@ -714,3 +714,46 @@ body {
 .ez-high { background: rgba(16, 185, 129, 0.18); color: #10b981; }   /* EZ Zone (수월함 높음) */
 .ez-normal { background: rgba(59, 130, 246, 0.18); color: #60a5fa; } /* Normal Zone */
 .ez-hard { background: rgba(244, 63, 94, 0.18); color: #f43f5e; }    /* Hard Zone (어려움) */
+
+/* =========================================================
+   ✨ 스마트 스크롤바 (평소엔 숨김 -> 스크롤 시 테마 색상으로 표시)
+   ========================================================= */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+body.is-scrolling * {
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+body.theme-dark.is-scrolling * {
+  scrollbar-color: rgba(113, 113, 122, 0.65) transparent;
+}
+
+/* 크롬 / 사파리 / 엣지 WebKit 스크롤바 커스텀 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background-color 0.25s ease;
+}
+
+/* 스크롤 중이거나 마우스를 올렸을 때만 다크/라이트 테마에 맞춰 은은하게 노출 */
+body.is-scrolling ::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+}
+
+body.theme-dark.is-scrolling ::-webkit-scrollbar-thumb,
+body.theme-dark *:hover::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.65);
+}
