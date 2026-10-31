@@ -1,16 +1,16 @@
 {
-  "name": "My Anki - 망각곡선 단어장",
-  "short_name": "My Anki",
-  "description": "망각곡선(SM-2) 기반 나만의 단어 암기 프로그램",
+  "name": "단어 해결사 - 플래시카드",
+  "short_name": "단어 해결사",
+  "description": "SM-2 알고리즘 기반 나만의 스마트 단어 암기 프로그램",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#2563eb",
+  "background_color": "#18181b",
+  "theme_color": "#ea580c",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>",
+      "src": "./charmander.png",
       "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
