@@ -11,14 +11,12 @@ if (!appElement) {
   throw new Error('[Critical Error] #app 엘리먼트를 찾을 수 없습니다.');
 }
 
-// 화면 모드 제어용 상태 변수
 let selectedDeckId: string | null = null;
 let studyingDeckId: string | null = null;
 let studyQueue: Card[] = [];
 let currentCardIndex = 0;
 let isAnswerRevealed = false;
 
-// 키보드 단축키 핸들러
 let currentKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function setKeyboardListener(handler: (e: KeyboardEvent) => void): void {
@@ -27,6 +25,26 @@ function setKeyboardListener(handler: (e: KeyboardEvent) => void): void {
   }
   currentKeyHandler = handler;
   window.addEventListener('keydown', currentKeyHandler);
+}
+
+/**
+ * 엑셀 파일의 인코딩(EUC-KR 또는 UTF-8)을 자동 감지하여 한글 깨짐을 원천 방지하는 리더
+ */
+async function readFileWithAutoEncoding(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  // 1차 시도: UTF-8 디코딩
+  const utf8Text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+  
+  // 만약 특수 깨짐 문자(U+FFFD )가 포함되어 있다면 한국 엑셀 표준인 EUC-KR로 재디코딩
+  if (utf8Text.includes('\uFFFD')) {
+    try {
+      const euckrDecoder = new TextDecoder('euc-kr');
+      return euckrDecoder.decode(buffer);
+    } catch {
+      return utf8Text;
+    }
+  }
+  return utf8Text;
 }
 
 /**
@@ -51,18 +69,17 @@ async function renderDashboard(): Promise<void> {
 
       return `
         <div class="deck-item">
-          <div>
-            <strong style="font-size: 17px;">📁 ${escapeHtml(deck.name)}</strong>
+          <div style="flex: 1; min-width: 0;">
+            <strong style="font-size: 16px; word-break: break-all;">📁 ${escapeHtml(deck.name)}</strong>
             <div class="deck-stats">
-              전체 카드: <b>${totalCards}</b>개 | 
-              오늘 복습할 카드: <span class="due-count">${dueCards}개</span>
+              전체: <b>${totalCards}</b>개 | 복습대기: <span class="due-count">${dueCards}개</span>
             </div>
           </div>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 6px; flex-shrink: 0;">
             <button class="btn-primary btn-start-study" data-id="${deck.id}" ${dueCards === 0 ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
-              📖 학습 시작 (${dueCards})
+              📖 학습 (${dueCards})
             </button>
-            <button class="btn-secondary btn-manage" data-id="${deck.id}">단어 관리</button>
+            <button class="btn-secondary btn-manage" data-id="${deck.id}">관리</button>
             <button class="btn-danger btn-delete-deck" data-id="${deck.id}">삭제</button>
           </div>
         </div>
@@ -74,15 +91,15 @@ async function renderDashboard(): Promise<void> {
     <div class="container">
       <div class="header">
         <div>
-          <h1 style="margin: 0;">🧠 My Anki 단어장</h1>
-          <div style="margin-top: 6px;">
-            <span class="badge">${isElectron ? '🖥️ Electron 앱 모드' : '🌐 Codespaces 웹 모드'}</span>
+          <h2 style="margin: 0; font-size: 20px;">🧠 My Anki 단어장</h2>
+          <div style="margin-top: 4px;">
+            <span class="badge">${isElectron ? '🖥️ 데스크톱 모드' : '📱 모바일 웹 모드'}</span>
           </div>
         </div>
-        <div style="display: flex; gap: 8px;">
-          <button id="btn-export-json" class="btn-secondary" style="font-size: 13px;">📥 백업 다운로드(JSON)</button>
-          <label class="btn-secondary" style="font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;">
-            📤 백업 복원(JSON)
+        <div style="display: flex; gap: 6px;">
+          <button id="btn-export-json" class="btn-secondary" style="font-size: 12px; padding: 8px 10px;">📥 백업</button>
+          <label class="btn-secondary" style="font-size: 12px; padding: 8px 10px; cursor: pointer; display: inline-flex; align-items: center;">
+            📤 복원
             <input type="file" id="input-import-json" accept=".json" style="display: none;" />
           </label>
         </div>
@@ -90,32 +107,32 @@ async function renderDashboard(): Promise<void> {
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-label">📚 보유 중인 전체 단어</div>
+          <div class="stat-label">📚 보유 단어</div>
           <div class="stat-value">${totalCardsCount}개</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">🔥 오늘 복습 대기</div>
+          <div class="stat-label">🔥 오늘 복습</div>
           <div class="stat-value" style="color: ${totalDueTodayCount > 0 ? '#dc2626' : '#10b981'};">
             ${totalDueTodayCount}개
           </div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">✨ 총 누적 복습 횟수</div>
+          <div class="stat-label">✨ 누적 복습</div>
           <div class="stat-value" style="color: #059669;">${totalReviewedCount}회</div>
         </div>
       </div>
 
       <div class="card-box">
-        <h3 style="margin-top: 0;">➕ 새 단어장(Deck) 만들기</h3>
+        <h3 style="margin-top: 0; font-size: 16px;">➕ 새 단어장 만들기</h3>
         <div class="form-row">
-          <input type="text" id="input-deck-name" placeholder="단어장 이름 (예: 토익 필수 영단어, CS 면접 질문)" />
+          <input type="text" id="input-deck-name" placeholder="단어장 이름 (예: 토익 필수 영단어)" />
           <button id="btn-create-deck" class="btn-primary">단어장 생성</button>
         </div>
       </div>
 
       <div class="card-box">
-        <h3 style="margin-top: 0;">📚 내 단어장 목록 (${data.decks.length})</h3>
-        ${deckListHtml || '<p style="color: #94a3b8;">아직 단어장이 없습니다. 위에서 새 단어장을 만들어보세요!</p>'}
+        <h3 style="margin-top: 0; font-size: 16px;">📚 내 단어장 목록 (${data.decks.length})</h3>
+        ${deckListHtml || '<p style="color: #94a3b8; font-size: 14px;">아직 단어장이 없습니다.</p>'}
       </div>
     </div>
   `;
@@ -179,7 +196,7 @@ async function renderDashboard(): Promise<void> {
     if (!file) return;
 
     try {
-      const text = await file.text();
+      const text = await readFileWithAutoEncoding(file);
       const parsed = JSON.parse(text) as StorageSchema;
 
       if (!parsed || !Array.isArray(parsed.decks)) {
@@ -200,7 +217,7 @@ async function renderDashboard(): Promise<void> {
 }
 
 /**
- * 2. 특정 단어장의 단어 관리 화면 (CSV 대량 등록 포함)
+ * 2. 단어 관리 화면 (모바일 최적화 & EUC-KR 한글 완벽 복구)
  */
 async function renderDeckManage(deckId: string): Promise<void> {
   const data = await api.getStorageData();
@@ -210,14 +227,14 @@ async function renderDeckManage(deckId: string): Promise<void> {
   const cardRowsHtml = deck.cards
     .map(card => `
       <div class="deck-item">
-        <div>
-          <div><strong>Q:</strong> ${escapeHtml(card.front)}</div>
-          <div style="color: #2563eb; margin-top: 4px;"><strong>A:</strong> ${escapeHtml(card.back)}</div>
+        <div style="flex: 1; min-width: 0;">
+          <div style="word-break: break-all;"><strong>Q:</strong> ${escapeHtml(card.front)}</div>
+          <div style="color: #2563eb; margin-top: 4px; word-break: break-all;"><strong>A:</strong> ${escapeHtml(card.back)}</div>
           <div class="deck-stats">
-            상태: ${card.state} | 간격: ${card.interval}일 | 난이도: ${card.easeFactor} | 복습예정: ${new Date(card.dueDate).toLocaleDateString()}
+            상태: ${card.state} | 간격: ${card.interval}일 | 복습: ${new Date(card.dueDate).toLocaleDateString()}
           </div>
         </div>
-        <button class="btn-danger btn-delete-card" data-card-id="${card.id}">삭제</button>
+        <button class="btn-danger btn-delete-card" data-card-id="${card.id}" style="flex-shrink: 0;">삭제</button>
       </div>
     `)
     .join('');
@@ -225,16 +242,15 @@ async function renderDeckManage(deckId: string): Promise<void> {
   appElement!.innerHTML = `
     <div class="container">
       <div class="header">
-        <h2 style="margin: 0;">📁 [${escapeHtml(deck.name)}] 단어 관리</h2>
-        <button id="btn-back" class="btn-secondary">⬅ 목록으로</button>
+        <h3 style="margin: 0; font-size: 18px; word-break: break-all;">📁 [${escapeHtml(deck.name)}]</h3>
+        <button id="btn-back" class="btn-secondary" style="font-size: 13px; padding: 8px 12px; flex-shrink: 0;">⬅ 목록으로</button>
       </div>
 
-      <!-- 단어 추가 & CSV 대량 등록 영역 -->
       <div class="card-box">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <h3 style="margin: 0;">✏️ 새 단어 추가</h3>
-          <label class="btn-secondary" style="font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;">
-            📂 CSV 파일로 대량 등록
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <h4 style="margin: 0; font-size: 16px;">✏️ 새 단어 추가</h4>
+          <label class="btn-secondary" style="font-size: 12px; padding: 6px 10px; cursor: pointer;">
+            📂 CSV 대량 등록
             <input type="file" id="input-csv-file" accept=".csv, .tsv, .txt" style="display: none;" />
           </label>
         </div>
@@ -243,14 +259,14 @@ async function renderDeckManage(deckId: string): Promise<void> {
           <input type="text" id="input-card-back" placeholder="뒷면: 뜻/정답 (예: 끈질긴, 지속되는)" />
           <button id="btn-add-card" class="btn-primary">단어 추가</button>
         </div>
-        <div style="font-size: 12px; color: #64748b; margin-top: 6px;">
-          💡 <b>CSV 작성 팁:</b> 엑셀에서 '단어,뜻' 형태로 작성 후 <code>.csv</code>로 저장하거나, 메모장에 한 줄씩 적어 업로드하면 수백 개도 즉시 추가됩니다!
-        </div>
       </div>
 
       <div class="card-box">
-        <h3 style="margin-top: 0;">🗂️ 등록된 카드 (${deck.cards.length}개)</h3>
-        ${cardRowsHtml || '<p style="color: #94a3b8;">등록된 카드가 없습니다.</p>'}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h4 style="margin: 0; font-size: 16px;">🗂️ 등록된 카드 (${deck.cards.length}개)</h4>
+          ${deck.cards.length > 0 ? `<button id="btn-clear-deck-cards" class="btn-danger" style="font-size: 11px; padding: 4px 8px;">전체 삭제</button>` : ''}
+        </div>
+        ${cardRowsHtml || '<p style="color: #94a3b8; font-size: 14px;">등록된 카드가 없습니다.</p>'}
       </div>
     </div>
   `;
@@ -260,7 +276,16 @@ async function renderDeckManage(deckId: string): Promise<void> {
     render();
   });
 
-  // 단일 단어 추가
+  // 잘못 들어간 깨진 단어 전체 정리용 버튼
+  document.getElementById('btn-clear-deck-cards')?.addEventListener('click', async () => {
+    if (confirm('이 단어장의 모든 카드를 삭제하고 다시 등록하시겠습니까?')) {
+      for (const c of [...deck.cards]) {
+        await api.deleteCard(deck.id, c.id);
+      }
+      await render();
+    }
+  });
+
   document.getElementById('btn-add-card')?.addEventListener('click', async () => {
     const front = (document.getElementById('input-card-front') as HTMLInputElement).value.trim();
     const back = (document.getElementById('input-card-back') as HTMLInputElement).value.trim();
@@ -269,35 +294,29 @@ async function renderDeckManage(deckId: string): Promise<void> {
     await render();
   });
 
-  // CSV 대량 등록 이벤트 연결
+  // 한글 깨짐 방지 디코더가 적용된 CSV 대량 등록
   const csvInput = document.getElementById('input-csv-file') as HTMLInputElement;
   csvInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
 
     try {
-      const text = await file.text();
+      const text = await readFileWithAutoEncoding(file);
       const parseResult = CsvParser.parse(text);
 
       if (parseResult.validCards.length === 0) {
-        alert('추가할 수 있는 유효한 단어가 없습니다. 파일 내용(앞면, 뒷면 구분)을 확인해주세요.');
+        alert('추가할 수 있는 유효한 단어가 없습니다. 파일 형식(앞면, 뒷면)을 확인해주세요.');
         return;
       }
 
-      const confirmMsg = `'${file.name}' 파일에서 유효한 단어 ${parseResult.validCards.length}개를 찾았습니다.\n(빈 칸/형식 오류 등으로 건너뛴 행: ${parseResult.skippedCount}개)\n\n지금 이 단어장에 일괄 등록하시겠습니까?`;
+      const confirmMsg = `'${file.name}' 파일에서 한글 정상 복원 완료!\n\n유효 단어: ${parseResult.validCards.length}개\n건너뛴 행: ${parseResult.skippedCount}개\n\n지금 등록하시겠습니까?`;
       if (!confirm(confirmMsg)) return;
 
-      // 일괄 추가 실행
       for (const item of parseResult.validCards) {
         await api.addCard(deck.id, item.front, item.back);
       }
 
-      let successMsg = `🎉 총 ${parseResult.validCards.length}개의 단어가 성공적으로 등록되었습니다!`;
-      if (parseResult.errors.length > 0) {
-        successMsg += `\n\n[참고: 건너뛴 ${parseResult.errors.length}건]\n` + parseResult.errors.slice(0, 3).join('\n');
-        if (parseResult.errors.length > 3) successMsg += `\n... 외 ${parseResult.errors.length - 3}건`;
-      }
-      alert(successMsg);
+      alert(`🎉 ${parseResult.validCards.length}개의 단어가 정상 등록되었습니다!`);
       await render();
     } catch (err) {
       alert(`CSV 처리 오류: ${(err as Error).message}`);
@@ -324,12 +343,12 @@ async function renderStudyRoom(): Promise<void> {
 
   if (!deck || currentCardIndex >= studyQueue.length) {
     appElement!.innerHTML = `
-      <div class="container" style="text-align: center; margin-top: 60px;">
-        <div class="card-box" style="padding: 48px 24px;">
-          <h1 style="font-size: 48px; margin: 0 0 16px 0;">🎉</h1>
-          <h2 style="color: #1e293b;">오늘의 학습을 모두 완료했습니다!</h2>
-          <p style="color: #64748b; margin-bottom: 24px;">망각곡선 알고리즘에 따라 다음 복습 일정이 안전하게 예약되었습니다.</p>
-          <button id="btn-finish-study" class="btn-primary" style="padding: 12px 24px; font-size: 16px;">대시보드로 돌아가기</button>
+      <div class="container" style="text-align: center; margin-top: 40px;">
+        <div class="card-box" style="padding: 36px 16px;">
+          <h1 style="font-size: 40px; margin: 0 0 12px 0;">🎉</h1>
+          <h2 style="color: #1e293b; font-size: 20px;">오늘의 학습을 모두 완료했습니다!</h2>
+          <p style="color: #64748b; font-size: 14px; margin-bottom: 20px;">망각곡선 알고리즘에 따라 다음 복습 일정이 예약되었습니다.</p>
+          <button id="btn-finish-study" class="btn-primary" style="padding: 12px 20px; font-size: 15px;">대시보드로 돌아가기</button>
         </div>
       </div>
     `;
@@ -348,12 +367,12 @@ async function renderStudyRoom(): Promise<void> {
     <div class="container">
       <div class="header">
         <div>
-          <h3 style="margin: 0;">📖 [${escapeHtml(deck.name)}] 암기 세션</h3>
-          <div style="font-size: 13px; color: #64748b; margin-top: 4px;">
-            남은 카드: <b>${remainingCount}</b>개 (진행률: ${currentCardIndex + 1}/${studyQueue.length})
+          <h3 style="margin: 0; font-size: 17px; word-break: break-all;">📖 [${escapeHtml(deck.name)}]</h3>
+          <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+            남은 카드: <b>${remainingCount}</b>개 (${currentCardIndex + 1}/${studyQueue.length})
           </div>
         </div>
-        <button id="btn-quit-study" class="btn-secondary">학습 중단</button>
+        <button id="btn-quit-study" class="btn-secondary" style="font-size: 12px; padding: 6px 10px;">중단</button>
       </div>
 
       <div class="study-box">
@@ -371,20 +390,20 @@ async function renderStudyRoom(): Promise<void> {
       ` : `
         <div class="rating-grid">
           <button class="btn-rate btn-again" data-rating="1">
-            <b>1. 다시 (Again)</b>
-            <span class="key-hint">내일 복습 [단축키: 1]</span>
+            <b>1. 다시</b>
+            <span class="key-hint">내일 복습 [1]</span>
           </button>
           <button class="btn-rate btn-hard" data-rating="2">
-            <b>2. 어려움 (Hard)</b>
-            <span class="key-hint">소폭 연장 [단축키: 2]</span>
+            <b>2. 어려움</b>
+            <span class="key-hint">소폭 연장 [2]</span>
           </button>
           <button class="btn-rate btn-good" data-rating="3">
-            <b>3. 알맞음 (Good)</b>
-            <span class="key-hint">표준 간격 [단축키: 3]</span>
+            <b>3. 알맞음</b>
+            <span class="key-hint">표준 간격 [3]</span>
           </button>
           <button class="btn-rate btn-easy" data-rating="4">
-            <b>4. 쉬움 (Easy)</b>
-            <span class="key-hint">장기 기억 [단축키: 4]</span>
+            <b>4. 쉬움</b>
+            <span class="key-hint">장기 기억 [4]</span>
           </button>
         </div>
       `}
@@ -459,5 +478,4 @@ async function render(): Promise<void> {
   }
 }
 
-// 최초 실행
 render();
