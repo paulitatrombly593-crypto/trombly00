@@ -95,13 +95,12 @@ function attachSwipeBackListener(onSwipeBack: () => void): void {
       // 현재 화면 컨테이너에 드래그 방향에 맞는 슬라이드 퇴장 클래스 부여
       const container = document.querySelector<HTMLDivElement>('.container');
       if (container) {
-        container.classList.add(deltaX < 0 ? 'slide-exit-left' : 'slide-exit-right');
+        container.classList.add('slide-exit');
       }
 
-      // 애니메이션(0.2초)이 끝나는 타이밍에 맞춰 부드럽게 화면 전환
       setTimeout(() => {
         onSwipeBack();
-      }, 200);
+      }, 160);
     }
   };
 }
