@@ -79,7 +79,7 @@ function triggerHaptic(ms = 10): void {
 let touchStartX = 0;
 let touchStartY = 0;
 
-function attachSwipeBackListener(onSwipeLeft: () => void): void {
+function attachSwipeBackListener(onSwipeBack: () => void): void {
   window.ontouchstart = (e: TouchEvent) => {
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
@@ -89,10 +89,19 @@ function attachSwipeBackListener(onSwipeLeft: () => void): void {
     const deltaX = e.changedTouches[0].clientX - touchStartX;
     const deltaY = e.changedTouches[0].clientY - touchStartY;
 
-    // 가로 이동 거리가 -60px 이하(왼쪽으로 드래그)이고, 세로 스크롤보다 가로 이동이 클 때 작동
-    if (deltaX < -60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+    if (Math.abs(deltaX) > 60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
       triggerHaptic(15);
-      onSwipeLeft();
+
+      // 현재 화면 컨테이너에 드래그 방향에 맞는 슬라이드 퇴장 클래스 부여
+      const container = document.querySelector<HTMLDivElement>('.container');
+      if (container) {
+        container.classList.add(deltaX < 0 ? 'slide-exit-left' : 'slide-exit-right');
+      }
+
+      // 애니메이션(0.2초)이 끝나는 타이밍에 맞춰 부드럽게 화면 전환
+      setTimeout(() => {
+        onSwipeBack();
+      }, 200);
     }
   };
 }

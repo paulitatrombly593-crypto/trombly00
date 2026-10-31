@@ -449,3 +449,35 @@ button:active {
   height: 18px;
   cursor: pointer;
 }
+
+/* =========================================================
+   🎬 페이지 전환 슬라이드 애니메이션
+   ========================================================= */
+.container {
+  animation: pageFadeSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pageFadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 왼쪽으로 스와이프할 때 화면이 왼쪽으로 슥 빠져나감 */
+.slide-exit-left {
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease !important;
+  transform: translateX(-100%) !important;
+  opacity: 0.2 !important;
+}
+
+/* 오른쪽으로 스와이프할 때 화면이 오른쪽으로 슥 빠져나감 */
+.slide-exit-right {
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease !important;
+  transform: translateX(100%) !important;
+  opacity: 0.2 !important;
+}
