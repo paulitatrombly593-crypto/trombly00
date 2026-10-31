@@ -2,6 +2,7 @@ import './styles.css';
 import { getAnkiAPI } from './api-adapter';
 import { Deck, Card, ReviewRating, StorageSchema } from '../shared/types';
 import { SM2Scheduler } from '../core/sm2';
+import { CsvParser } from '../shared/csv-parser';
 
 const api = getAnkiAPI();
 const appElement = document.querySelector<HTMLDivElement>('#app');
@@ -29,13 +30,12 @@ function setKeyboardListener(handler: (e: KeyboardEvent) => void): void {
 }
 
 /**
- * 1. 메인 대시보드 화면 (통계 요약 카드 포함)
+ * 1. 메인 대시보드 화면
  */
 async function renderDashboard(): Promise<void> {
   const data = await api.getStorageData();
   const isElectron = 'ankiAPI' in window;
 
-  // 전체 통계 계산
   let totalCardsCount = 0;
   let totalDueTodayCount = 0;
   data.decks.forEach(d => {
@@ -88,7 +88,6 @@ async function renderDashboard(): Promise<void> {
         </div>
       </div>
 
-      <!-- 상단 통계 카드 3개 -->
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-label">📚 보유 중인 전체 단어</div>
@@ -121,7 +120,6 @@ async function renderDashboard(): Promise<void> {
     </div>
   `;
 
-  // 단어장 생성
   document.getElementById('btn-create-deck')?.addEventListener('click', async () => {
     const input = document.getElementById('input-deck-name') as HTMLInputElement;
     const name = input.value.trim();
@@ -130,7 +128,6 @@ async function renderDashboard(): Promise<void> {
     await render();
   });
 
-  // 단어장 삭제
   document.querySelectorAll('.btn-delete-deck').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = (e.currentTarget as HTMLButtonElement).dataset.id!;
@@ -141,7 +138,6 @@ async function renderDashboard(): Promise<void> {
     });
   });
 
-  // 단어 관리 모드
   document.querySelectorAll('.btn-manage').forEach(btn => {
     btn.addEventListener('click', (e) => {
       selectedDeckId = (e.currentTarget as HTMLButtonElement).dataset.id!;
@@ -149,7 +145,6 @@ async function renderDashboard(): Promise<void> {
     });
   });
 
-  // 학습 세션 시작
   document.querySelectorAll('.btn-start-study').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = (e.currentTarget as HTMLButtonElement).dataset.id!;
@@ -167,7 +162,6 @@ async function renderDashboard(): Promise<void> {
     });
   });
 
-  // 백업 다운로드
   document.getElementById('btn-export-json')?.addEventListener('click', async () => {
     const exportData = await api.getStorageData();
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -179,7 +173,6 @@ async function renderDashboard(): Promise<void> {
     URL.revokeObjectURL(url);
   });
 
-  // 백업 복원
   const fileInput = document.getElementById('input-import-json') as HTMLInputElement;
   fileInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -207,7 +200,7 @@ async function renderDashboard(): Promise<void> {
 }
 
 /**
- * 2. 단어 관리 화면
+ * 2. 특정 단어장의 단어 관리 화면 (CSV 대량 등록 포함)
  */
 async function renderDeckManage(deckId: string): Promise<void> {
   const data = await api.getStorageData();
@@ -236,12 +229,22 @@ async function renderDeckManage(deckId: string): Promise<void> {
         <button id="btn-back" class="btn-secondary">⬅ 목록으로</button>
       </div>
 
+      <!-- 단어 추가 & CSV 대량 등록 영역 -->
       <div class="card-box">
-        <h3 style="margin-top: 0;">✏️ 새 단어 추가</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="margin: 0;">✏️ 새 단어 추가</h3>
+          <label class="btn-secondary" style="font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;">
+            📂 CSV 파일로 대량 등록
+            <input type="file" id="input-csv-file" accept=".csv, .tsv, .txt" style="display: none;" />
+          </label>
+        </div>
         <div class="form-row">
           <input type="text" id="input-card-front" placeholder="앞면: 단어/질문 (예: Persistent)" />
           <input type="text" id="input-card-back" placeholder="뒷면: 뜻/정답 (예: 끈질긴, 지속되는)" />
           <button id="btn-add-card" class="btn-primary">단어 추가</button>
+        </div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 6px;">
+          💡 <b>CSV 작성 팁:</b> 엑셀에서 '단어,뜻' 형태로 작성 후 <code>.csv</code>로 저장하거나, 메모장에 한 줄씩 적어 업로드하면 수백 개도 즉시 추가됩니다!
         </div>
       </div>
 
@@ -257,12 +260,50 @@ async function renderDeckManage(deckId: string): Promise<void> {
     render();
   });
 
+  // 단일 단어 추가
   document.getElementById('btn-add-card')?.addEventListener('click', async () => {
     const front = (document.getElementById('input-card-front') as HTMLInputElement).value.trim();
     const back = (document.getElementById('input-card-back') as HTMLInputElement).value.trim();
     if (!front || !back) return alert('앞면과 뒷면을 모두 입력해주세요!');
     await api.addCard(deck.id, front, back);
     await render();
+  });
+
+  // CSV 대량 등록 이벤트 연결
+  const csvInput = document.getElementById('input-csv-file') as HTMLInputElement;
+  csvInput?.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parseResult = CsvParser.parse(text);
+
+      if (parseResult.validCards.length === 0) {
+        alert('추가할 수 있는 유효한 단어가 없습니다. 파일 내용(앞면, 뒷면 구분)을 확인해주세요.');
+        return;
+      }
+
+      const confirmMsg = `'${file.name}' 파일에서 유효한 단어 ${parseResult.validCards.length}개를 찾았습니다.\n(빈 칸/형식 오류 등으로 건너뛴 행: ${parseResult.skippedCount}개)\n\n지금 이 단어장에 일괄 등록하시겠습니까?`;
+      if (!confirm(confirmMsg)) return;
+
+      // 일괄 추가 실행
+      for (const item of parseResult.validCards) {
+        await api.addCard(deck.id, item.front, item.back);
+      }
+
+      let successMsg = `🎉 총 ${parseResult.validCards.length}개의 단어가 성공적으로 등록되었습니다!`;
+      if (parseResult.errors.length > 0) {
+        successMsg += `\n\n[참고: 건너뛴 ${parseResult.errors.length}건]\n` + parseResult.errors.slice(0, 3).join('\n');
+        if (parseResult.errors.length > 3) successMsg += `\n... 외 ${parseResult.errors.length - 3}건`;
+      }
+      alert(successMsg);
+      await render();
+    } catch (err) {
+      alert(`CSV 처리 오류: ${(err as Error).message}`);
+    } finally {
+      csvInput.value = '';
+    }
   });
 
   document.querySelectorAll('.btn-delete-card').forEach(btn => {

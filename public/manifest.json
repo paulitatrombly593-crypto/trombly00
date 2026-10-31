@@ -1,0 +1,17 @@
+{
+  "name": "My Anki - 망각곡선 단어장",
+  "short_name": "My Anki",
+  "description": "망각곡선(SM-2) 기반 나만의 단어 암기 프로그램",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
