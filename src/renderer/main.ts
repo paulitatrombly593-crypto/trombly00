@@ -18,6 +18,7 @@ const ANKI_SETTINGS_KEY = 'MY_ANKI_PRO_SETTINGS_V2';
 const STARRED_CARDS_KEY = 'MY_ANKI_STARRED_CARDS';
 
 type SettingsTab = 'new' | 'review' | 'lapse' | 'general' | 'display';
+type SubPageMode = 'none' | 'today-quota' | 'starred-list';
 
 function loadSettings(): AnkiSettings {
   try {
@@ -32,6 +33,9 @@ function loadSettings(): AnkiSettings {
 let settings: AnkiSettings = loadSettings();
 let activeSettingsTab: SettingsTab = 'new';
 let isSettingsModalOpen = false;
+let isAllCardsModalOpen = false; // 📚 전체 카드 '창 안에 창' 모달 상태
+let currentSubPage: SubPageMode = 'none'; // 🔥 오늘 할당량 / ⭐ 중요 표시 전용 페이지 상태
+
 let starredCardIds: Set<string> = new Set(JSON.parse(localStorage.getItem(STARRED_CARDS_KEY) || '[]'));
 
 function saveSettings(newSettings: AnkiSettings): void {
@@ -46,6 +50,44 @@ function applyDisplayClasses(): void {
 }
 
 applyDisplayClasses();
+
+// =========================================================
+// 📊 단어 진척도(Mastery) 및 EZ Zone 점수 산출 헬퍼
+// =========================================================
+function getCardMasteryInfo(card: Card): {
+  levelText: string;
+  progressPct: number;
+  barColor: string;
+  ezText: string;
+  ezClass: string;
+} {
+  const easePct = Math.round((card.easeFactor || 2.5) * 100);
+  let ezText = `EZ ${easePct}% (표준)`;
+  let ezClass = 'ez-normal';
+
+  if (easePct >= 260) {
+    ezText = `🟢 EZ Zone (${easePct}%)`;
+    ezClass = 'ez-high';
+  } else if (easePct <= 210) {
+    ezText = `🔴 Hard Zone (${easePct}%)`;
+    ezClass = 'ez-hard';
+  } else {
+    ezText = `🔵 Normal Zone (${easePct}%)`;
+    ezClass = 'ez-normal';
+  }
+
+  if (card.state === 'new') {
+    return { levelText: '🌱 미학습 (Lv.0)', progressPct: 5, barColor: '#94a3b8', ezText, ezClass };
+  }
+  if (card.state === 'learning' || card.state === 'relearning' || card.interval < 3) {
+    return { levelText: '🔥 단기암기 (Lv.1)', progressPct: 30, barColor: '#f97316', ezText, ezClass };
+  }
+  if (card.interval < 21) {
+    const pct = Math.min(85, 35 + Math.round((card.interval / 21) * 50));
+    return { levelText: '⚡ 장기기억 진입 (Lv.2)', progressPct: pct, barColor: '#3b82f6', ezText, ezClass };
+  }
+  return { levelText: '👑 완전 마스터 (Lv.3)', progressPct: 100, barColor: '#10b981', ezText, ezClass };
+}
 
 // =========================================================
 // 🔊 TTS 오디오, 햅틱, 스와이프, 답변 타이머 관리
@@ -91,7 +133,7 @@ function attachSwipeBackListener(onSwipeBack: () => void): void {
   };
 
   window.ontouchend = (e: TouchEvent) => {
-    if (isSettingsModalOpen) return;
+    if (isSettingsModalOpen || isAllCardsModalOpen) return;
     const deltaX = e.changedTouches[0].clientX - touchStartX;
     const deltaY = e.changedTouches[0].clientY - touchStartY;
 
@@ -112,6 +154,7 @@ function clearSwipeListener(): void {
 // 화면 상태 변수
 let selectedDeckId: string | null = null;
 let studyingDeckId: string | null = null;
+let isStarCramMode = false; // ⭐ 별표 전용 순수 플래시카드 모드 (SM-2 미적용)
 let studyQueue: Card[] = [];
 let currentCardIndex = 0;
 let isAnswerRevealed = false;
@@ -161,14 +204,9 @@ async function readFileWithAutoEncoding(file: File): Promise<string> {
   return utf8Text;
 }
 
-/**
- * 오늘 날짜 기준으로 이미 공부한 새 카드 수와 복습 수를 계산 (일일 목표 할당량 반영)
- */
 function buildDailyStudyQueue(deck: Deck, logs: StorageSchema['logs']): { queue: Card[]; dueNewCount: number; dueRevCount: number } {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayLogs = logs.filter(l => l.deckId === deck.id && l.reviewDate.startsWith(todayStr));
-
-  // 오늘 이미 학습한 고유 카드 수 파악
   const reviewedCardIdsToday = new Set(todayLogs.map(l => l.cardId));
 
   const remainingNewQuota = Math.max(0, settings.newCardsPerDay - [...reviewedCardIdsToday].filter(id => {
@@ -178,17 +216,14 @@ function buildDailyStudyQueue(deck: Deck, logs: StorageSchema['logs']): { queue:
 
   const remainingReviewQuota = Math.max(0, settings.maxReviewsPerDay - todayLogs.length);
 
-  // 1순위: 현재 분 단위 학습/재학습 중이며 시간이 도래한 카드 (목표량 제한 없이 우선 출제)
   const learningDue = deck.cards.filter(
     c => !c.suspended && (c.state === 'learning' || c.state === 'relearning') && SM2Scheduler.isDue(c)
   );
 
-  // 2순위: 장기 복습(review) 중 오늘 날짜가 도래한 카드
   const reviewDue = deck.cards
     .filter(c => !c.suspended && c.state === 'review' && SM2Scheduler.isDue(c))
     .slice(0, remainingReviewQuota);
 
-  // 3순위: 새 카드(new)
   let newCandidates = deck.cards.filter(c => !c.suspended && c.state === 'new');
   if (settings.newCardOrder === 'random') {
     newCandidates = [...newCandidates].sort(() => Math.random() - 0.5);
@@ -204,7 +239,320 @@ function buildDailyStudyQueue(deck: Deck, logs: StorageSchema['logs']): { queue:
 }
 
 // =========================================================
-// 🎛️ 전문가용 5대 카테고리 사이드바 설정 모달 (사진 2~5번 구현)
+// 📚 [기능 1] '전체 카드' 창 안에 창(모달) 렌더링 (스크롤 & 진척도/수준 확인)
+// =========================================================
+function renderAllCardsModalHtml(decks: Deck[]): string {
+  if (!isAllCardsModalOpen) return '';
+
+  const allCards: { card: Card; deckName: string }[] = [];
+  decks.forEach(d => {
+    d.cards.forEach(c => allCards.push({ card: c, deckName: d.name }));
+  });
+
+  const now = new Date();
+  const rowsHtml = allCards.map(({ card, deckName }) => {
+    const m = getCardMasteryInfo(card);
+    const dueBadge = SM2Scheduler.formatDueBadge(card, now);
+    const isStar = starredCardIds.has(card.id);
+
+    return `
+      <div class="deck-item" style="flex-direction: column; align-items: stretch; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span class="tag-badge tag-due-later">📁 ${escapeHtml(deckName)}</span>
+            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
+            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+          </div>
+          <button class="btn-modal-star" data-card-id="${card.id}" style="background:transparent; font-size:20px; padding:2px 6px; color:${isStar ? '#84cc16' : 'var(--text-secondary)'};">
+            ${isStar ? '★' : '☆'}
+          </button>
+        </div>
+        <div style="font-size: 15px; word-break: break-all;">
+          <strong>Q:</strong> ${escapeHtml(card.front)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${escapeHtml(card.back)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-secondary);">
+          <span>진척도: <b>${m.progressPct}%</b> (현재 간격: ${card.interval}일)</span>
+          <span>${dueBadge}</span>
+        </div>
+        <div class="mastery-bar-track">
+          <div class="mastery-bar-fill" style="width: ${m.progressPct}%; background: ${m.barColor};"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="modal-overlay" id="all-cards-modal-overlay">
+      <div class="pro-modal-content" style="max-width: 680px;" onclick="event.stopPropagation();">
+        <div class="pro-modal-header">
+          <div>
+            <h3 style="margin: 0; font-size: 17px;">📚 전체 보유 카드 진척도 브라우저 (총 ${allCards.length}장)</h3>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+              모든 단어장의 카드 수준(Lv.0~Lv.3)과 EZ Zone 난이도를 스크롤로 확인하세요.
+            </div>
+          </div>
+          <button id="btn-close-all-cards" class="icon-circle-btn" style="width:32px; height:32px; font-size:14px;">✕</button>
+        </div>
+        <div style="padding: 16px;">
+          <div class="all-cards-modal-list">
+            ${rowsHtml || '<p style="text-align:center; color:var(--text-secondary);">등록된 카드가 없습니다.</p>'}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function attachAllCardsModalEvents(): void {
+  if (!isAllCardsModalOpen) return;
+  const close = () => {
+    isAllCardsModalOpen = false;
+    render();
+  };
+  document.getElementById('all-cards-modal-overlay')?.addEventListener('click', close);
+  document.getElementById('btn-close-all-cards')?.addEventListener('click', close);
+
+  document.querySelectorAll<HTMLButtonElement>('.btn-modal-star').forEach(btn => {
+    btn.addEventListener('click', () => {
+      toggleStarCard(btn.dataset.cardId!);
+      render();
+    });
+  });
+}
+
+// =========================================================
+// 🔥 [기능 2] '오늘 할당량' 전용 페이지 (오늘 학습/복습 완료 구분 + 남은 할당량 + EZ Zone)
+// =========================================================
+async function renderTodayQuotaPage(): Promise<void> {
+  const data = await api.getStorageData();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+
+  // 1) 오늘 학습/복습 완료한 로그 및 카드 매칭
+  const todayLogs = data.logs.filter(l => l.reviewDate.startsWith(todayStr));
+  const completedItemsHtml = todayLogs.slice().reverse().map(log => {
+    const deck = data.decks.find(d => d.id === log.deckId);
+    const card = deck?.cards.find(c => c.id === log.cardId);
+    if (!card || !deck) return '';
+
+    const isNewLearned = log.lastInterval === 0;
+    const typeBadge = isNewLearned
+      ? `<span class="tag-badge tag-new">🌱 오늘 신규 학습</span>`
+      : `<span class="tag-badge tag-due-later">🔄 오늘 복습 완료</span>`;
+
+    const m = getCardMasteryInfo(card);
+    const nextDue = SM2Scheduler.formatDueBadge(card, now);
+    const timeStr = new Date(log.reviewDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return `
+      <div class="deck-item" style="flex-direction: column; align-items: stretch; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+          <div>
+            ${typeBadge}
+            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
+          </div>
+          <span style="font-size: 11px; color: var(--text-secondary);">🕒 완료 시각: ${timeStr}</span>
+        </div>
+        <div style="font-size: 15px;">
+          <strong>Q:</strong> ${escapeHtml(card.front)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${escapeHtml(card.back)}</span>
+        </div>
+        <div class="deck-stats">
+          📁 [${escapeHtml(deck.name)}] · 선택한 평가: <b>${log.rating}번</b> · 진척도(다음 복습): <b>${nextDue}</b>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 2) 오늘 아직 남아있는 할당량 카드 모음
+  const pendingCards: { card: Card; deckName: string; deckId: string }[] = [];
+  data.decks.forEach(d => {
+    const { queue } = buildDailyStudyQueue(d, data.logs);
+    queue.forEach(c => pendingCards.push({ card: c, deckName: d.name, deckId: d.id }));
+  });
+
+  const pendingItemsHtml = pendingCards.map(({ card, deckName }) => {
+    const m = getCardMasteryInfo(card);
+    const isNew = card.state === 'new';
+    return `
+      <div class="deck-item">
+        <div style="flex: 1; min-width: 0;">
+          <div style="margin-bottom: 4px; display: flex; gap: 4px; flex-wrap: wrap;">
+            <span class="tag-badge ${isNew ? 'tag-new' : 'tag-due-now'}">${isNew ? '🌱 신규 배정' : '🔥 복습 대기'}</span>
+            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
+          </div>
+          <div style="font-size: 15px; word-break: break-all;">
+            <strong>Q:</strong> ${escapeHtml(card.front)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${escapeHtml(card.back)}</span>
+          </div>
+          <div class="deck-stats">📁 ${escapeHtml(deckName)} · 현재 간격: ${card.interval}일</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  appElement!.innerHTML = `
+    <div class="container">
+      <div class="header" style="justify-content: flex-start; gap: 10px;">
+        <button id="btn-back-quota" class="btn-secondary" style="font-size: 13px; padding: 8px 12px;">⬅ 대시보드</button>
+        <h3 style="margin: 0; font-size: 18px; flex: 1; text-align: right;">🔥 오늘의 할당량 &amp; 학습 리포트</h3>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">⏳ 남은 오늘 할당량</div>
+          <div class="stat-value" style="color: #f43f5e;">${pendingCards.length}장</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">✅ 오늘 학습/복습 완료</div>
+          <div class="stat-value" style="color: #10b981;">${todayLogs.length}회</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">🎯 일일 새 카드 목표</div>
+          <div class="stat-value">${settings.newCardsPerDay}장</div>
+        </div>
+      </div>
+
+      <!-- 1. 오늘 학습/복습 완료한 단어 리스트 -->
+      <div class="card-box">
+        <h4 style="margin: 0 0 12px 0; font-size: 15px; color: #10b981;">
+          ✅ 오늘 학습 및 복습 완료한 단어 (${todayLogs.length}건)
+        </h4>
+        <div style="max-height: 320px; overflow-y: auto;">
+          ${completedItemsHtml || '<p style="color: var(--text-secondary); font-size: 13.5px;">오늘 아직 학습을 완료한 단어가 없습니다. 지금 첫 학습을 시작해보세요!</p>'}
+        </div>
+      </div>
+
+      <!-- 2. 오늘 남은 할당량 리스트 -->
+      <div class="card-box" style="flex: 1;">
+        <h4 style="margin: 0 0 12px 0; font-size: 15px; color: #f43f5e;">
+          🔥 오늘 학습 대기 중인 할당량 (${pendingCards.length}장)
+        </h4>
+        <div style="max-height: 360px; overflow-y: auto;">
+          ${pendingItemsHtml || '<p style="color: var(--text-secondary); font-size: 13.5px;">🎉 오늘 배정된 모든 할당량을 완벽히 끝냈습니다!</p>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const goBack = () => {
+    clearSwipeListener();
+    currentSubPage = 'none';
+    render();
+  };
+  document.getElementById('btn-back-quota')?.addEventListener('click', goBack);
+  attachSwipeBackListener(goBack);
+}
+
+// =========================================================
+// ⭐ [기능 3] '중요 표시(별표)' 전용 페이지 & SM-2 제외 순수 플래시카드 복습 모드
+// =========================================================
+async function renderStarredPage(): Promise<void> {
+  const data = await api.getStorageData();
+  const starredCards: { card: Card; deckName: string }[] = [];
+
+  data.decks.forEach(d => {
+    d.cards.forEach(c => {
+      if (starredCardIds.has(c.id)) {
+        starredCards.push({ card: c, deckName: d.name });
+      }
+    });
+  });
+
+  const now = new Date();
+  const listHtml = starredCards.map(({ card, deckName }) => {
+    const m = getCardMasteryInfo(card);
+    const dueBadge = SM2Scheduler.formatDueBadge(card, now);
+
+    return `
+      <div class="deck-item">
+        <div style="flex: 1; min-width: 0;">
+          <div style="margin-bottom: 4px; display: flex; gap: 4px; flex-wrap: wrap;">
+            <span class="tag-badge tag-due-later">📁 ${escapeHtml(deckName)}</span>
+            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
+            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+          </div>
+          <div style="font-size: 15.5px; word-break: break-all;">
+            ⭐ <strong>Q:</strong> ${escapeHtml(card.front)}
+          </div>
+          <div style="color: #60a5fa; margin-top: 3px; font-size: 14px; word-break: break-all;">
+            <strong>A:</strong> ${escapeHtml(card.back)}
+          </div>
+          <div class="deck-stats">원래 스케줄: ${dueBadge}</div>
+        </div>
+        <button class="btn-danger btn-unstar-card" data-card-id="${card.id}" style="flex-shrink: 0; background:#52525b;">
+          ★ 해제
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  appElement!.innerHTML = `
+    <div class="container">
+      <div class="header" style="justify-content: flex-start; gap: 10px;">
+        <button id="btn-back-starred" class="btn-secondary" style="font-size: 13px; padding: 8px 12px;">⬅ 대시보드</button>
+        <h3 style="margin: 0; font-size: 18px; flex: 1; text-align: right;">⭐ 중요 표시(별표) 단어장</h3>
+      </div>
+
+      <!-- 상단 별표 전용 플래시카드 테스트 시작 박스 -->
+      <div class="card-box" style="border-color: #84cc16;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h4 style="margin: 0; font-size: 16px; color: #84cc16;">⚡ 별표 단어 집중 암기 테스트 (자유 복습 모드)</h4>
+            <div style="font-size: 12.5px; color: var(--text-secondary); margin-top: 4px;">
+              기존 망각곡선(SM-2) 복습 날짜나 난이도 점수를 건드리지 않고, 부족한 별표 단어만 순수 플래시카드로 반복 테스트합니다!
+            </div>
+          </div>
+          <button id="btn-start-star-cram" class="btn-primary" style="background: #65a30d; padding: 14px 20px; font-size: 15px;" ${starredCards.length === 0 ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''}>
+            ⭐ 별표 단어만 복습 시작 (${starredCards.length}장)
+          </button>
+        </div>
+      </div>
+
+      <!-- 별표 단어 스크롤 목록 -->
+      <div class="card-box" style="flex: 1;">
+        <h4 style="margin: 0 0 12px 0; font-size: 15px;">🗂️ 중요 표시된 단어 목록 (${starredCards.length}개)</h4>
+        <div style="max-height: 60dvh; overflow-y: auto;">
+          ${listHtml || '<p style="color: var(--text-secondary); font-size: 14px;">아직 별표(★) 표시한 단어가 없습니다. 학습 중 좌측 상단의 ☆ 버튼을 눌러 중요 단어를 모아보세요!</p>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const goBack = () => {
+    clearSwipeListener();
+    currentSubPage = 'none';
+    render();
+  };
+  document.getElementById('btn-back-starred')?.addEventListener('click', goBack);
+  attachSwipeBackListener(goBack);
+
+  // 별표 해제 버튼
+  document.querySelectorAll<HTMLButtonElement>('.btn-unstar-card').forEach(btn => {
+    btn.addEventListener('click', () => {
+      toggleStarCard(btn.dataset.cardId!);
+      render();
+    });
+  });
+
+  // ⚡ 별표 전용 순수 플래시카드 복습 시작! (SM-2 제외)
+  document.getElementById('btn-start-star-cram')?.addEventListener('click', async () => {
+    if (starredCards.length === 0) return;
+    isStarCramMode = true;
+    studyingDeckId = 'STAR_CRAM_MODE';
+    studyQueue = starredCards.map(item => ({ ...item.card }));
+    currentCardIndex = 0;
+    isAnswerRevealed = false;
+    lastReactionText = 'Star Cram ⭐';
+    await render();
+    if (settings.autoPlayAudio && studyQueue[0]) {
+      speakText(studyQueue[0].front);
+    }
+  });
+}
+
+// =========================================================
+// 🎛️ 전문가용 5대 카테고리 사이드바 설정 모달
 // =========================================================
 function renderSettingsModalHtml(): string {
   if (!isSettingsModalOpen) return '';
@@ -421,7 +769,6 @@ function renderSettingsModalHtml(): string {
         </div>
 
         <div class="pro-modal-body">
-          <!-- 좌측 사이드바 카테고리 -->
           <div class="pro-sidebar">
             <button class="pro-tab-btn ${activeSettingsTab === 'new' ? 'active' : ''}" data-tab="new">🌱 새 카드</button>
             <button class="pro-tab-btn ${activeSettingsTab === 'review' ? 'active' : ''}" data-tab="review">🔄 복습</button>
@@ -430,7 +777,6 @@ function renderSettingsModalHtml(): string {
             <button class="pro-tab-btn ${activeSettingsTab === 'display' ? 'active' : ''}" data-tab="display">🎨 화면·백업</button>
           </div>
 
-          <!-- 우측 세부 설정 폼 -->
           <div class="pro-panel">
             ${rightPanelHtml}
           </div>
@@ -449,9 +795,6 @@ function renderSettingsModalHtml(): string {
   `;
 }
 
-/**
- * 현재 열려 있는 탭의 입력값들을 읽어서 settings 객체에 반영
- */
 function collectCurrentTabInputs(): void {
   const getVal = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value;
   const getNum = (id: string, fallback: number) => {
@@ -497,7 +840,6 @@ function collectCurrentTabInputs(): void {
 function attachSettingsModalEvents(): void {
   if (!isSettingsModalOpen) return;
 
-  // 좌측 사이드바 탭 전환 (현재 탭 값 자동 저장 후 전환)
   document.querySelectorAll<HTMLButtonElement>('.pro-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       collectCurrentTabInputs();
@@ -506,7 +848,6 @@ function attachSettingsModalEvents(): void {
     });
   });
 
-  // 닫기 / 확인 저장
   const closeAndSave = () => {
     collectCurrentTabInputs();
     isSettingsModalOpen = false;
@@ -517,7 +858,6 @@ function attachSettingsModalEvents(): void {
   document.getElementById('btn-close-modal-x')?.addEventListener('click', closeAndSave);
   document.getElementById('btn-save-settings')?.addEventListener('click', closeAndSave);
 
-  // 국밥 기본값 복원 버튼
   document.getElementById('btn-restore-defaults')?.addEventListener('click', () => {
     if (confirm('인터넷 Anki 추천 국밥 세팅(익힘 2 10분, 일일 새 카드 20장, 초기 수월함 250%, 쉬움 보너스 130%)으로 모든 설정을 초기화하시겠습니까?')) {
       saveSettings({
@@ -529,7 +869,6 @@ function attachSettingsModalEvents(): void {
     }
   });
 
-  // 백업 다운로드 (설정창 내부)
   document.getElementById('btn-export-json')?.addEventListener('click', async () => {
     const exportData = await api.getStorageData();
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -541,7 +880,6 @@ function attachSettingsModalEvents(): void {
     URL.revokeObjectURL(url);
   });
 
-  // 백업 복원 (설정창 내부)
   const fileInput = document.getElementById('input-import-json') as HTMLInputElement | null;
   fileInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -563,7 +901,7 @@ function attachSettingsModalEvents(): void {
 }
 
 // =========================================================
-// 1. 메인 대시보드 화면 (잡다한 버튼 제거 & 깔끔한 목표 중심 UI)
+// 1. 메인 대시보드 화면 (상단 3개 카드가 모두 인터랙티브 버튼으로 동작!)
 // =========================================================
 async function renderDashboard(): Promise<void> {
   clearSwipeListener();
@@ -613,20 +951,24 @@ async function renderDashboard(): Promise<void> {
         <button id="btn-open-settings" class="icon-circle-btn" title="상세 설정">⚙️</button>
       </div>
 
+      <!-- ✨ 클릭/터치 가능한 3대 인터랙티브 통계 버튼 -->
       <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card stat-card-interactive" id="btn-stat-all-cards">
           <div class="stat-label">📚 전체 카드</div>
           <div class="stat-value">${totalCardsCount}</div>
+          <div class="stat-action-hint">클릭하여 진척도 창 열기 ↗</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card-interactive" id="btn-stat-today-quota">
           <div class="stat-label">🔥 오늘 할당량</div>
           <div class="stat-value" style="color: ${totalDueTodayCount > 0 ? '#f43f5e' : '#10b981'};">
             ${totalDueTodayCount}
           </div>
+          <div class="stat-action-hint">오늘 학습·EZ Zone 보기 ➔</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card-interactive" id="btn-stat-starred">
           <div class="stat-label">⭐ 중요 표시</div>
           <div class="stat-value" style="color: #84cc16;">${starredCardIds.size}</div>
+          <div class="stat-action-hint">별표 단어장·집중 복습 ➔</div>
         </div>
       </div>
 
@@ -644,13 +986,37 @@ async function renderDashboard(): Promise<void> {
       </div>
     </div>
     ${renderSettingsModalHtml()}
+    ${renderAllCardsModalHtml(data.decks)}
   `;
+
+  // 1) 전체 카드 클릭 -> 창 안에 창(모달) 오픈
+  document.getElementById('btn-stat-all-cards')?.addEventListener('click', () => {
+    triggerHaptic(12);
+    isAllCardsModalOpen = true;
+    render();
+  });
+
+  // 2) 오늘 할당량 클릭 -> 전용 페이지 이동
+  document.getElementById('btn-stat-today-quota')?.addEventListener('click', () => {
+    triggerHaptic(12);
+    currentSubPage = 'today-quota';
+    render();
+  });
+
+  // 3) 중요 표시 클릭 -> 별표 전용 페이지 이동
+  document.getElementById('btn-stat-starred')?.addEventListener('click', () => {
+    triggerHaptic(12);
+    currentSubPage = 'starred-list';
+    render();
+  });
 
   document.getElementById('btn-open-settings')?.addEventListener('click', () => {
     isSettingsModalOpen = true;
     render();
   });
+
   attachSettingsModalEvents();
+  attachAllCardsModalEvents();
 
   document.getElementById('btn-create-deck')?.addEventListener('click', async () => {
     const input = document.getElementById('input-deck-name') as HTMLInputElement;
@@ -687,6 +1053,7 @@ async function renderDashboard(): Promise<void> {
       const { queue } = buildDailyStudyQueue(targetDeck, freshData.logs);
       if (queue.length === 0) return alert('오늘 목표 할당량을 모두 학습했거나 복습할 카드가 없습니다!');
 
+      isStarCramMode = false;
       studyingDeckId = id;
       studyQueue = queue;
       currentCardIndex = 0;
@@ -701,7 +1068,7 @@ async function renderDashboard(): Promise<void> {
 }
 
 // =========================================================
-// 2. 단어 관리 화면 (정밀 날짜/시간 라벨링 & 복습 예정 배지)
+// 2. 단어 관리 화면
 // =========================================================
 async function renderDeckManage(deckId: string): Promise<void> {
   const data = await api.getStorageData();
@@ -716,12 +1083,14 @@ async function renderDeckManage(deckId: string): Promise<void> {
       const isDueNow = SM2Scheduler.isDue(card, now) && card.state !== 'new';
       const badgeClass = card.state === 'new' ? 'tag-new' : (isDueNow ? 'tag-due-now' : 'tag-due-later');
       const lastReviewedStr = SM2Scheduler.formatLastReviewed(card);
+      const m = getCardMasteryInfo(card);
 
       return `
         <div class="deck-item">
           <div style="flex: 1; min-width: 0;">
             <div style="margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
               <span class="tag-badge ${badgeClass}">${dueBadgeText}</span>
+              <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
               ${card.isLeech ? `<span class="tag-badge tag-leech">🩸 거머리(${card.lapses}회 실패)</span>` : ''}
             </div>
             <div style="word-break: break-all; font-size: 15px;">
@@ -731,7 +1100,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
               <strong>A:</strong> ${escapeHtml(card.back)}
             </div>
             <div class="deck-stats" style="margin-top: 6px;">
-              🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b> · 수월함: <b>${Math.round(card.easeFactor * 100)}%</b>
+              🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b> · 수준: <b>${m.levelText}</b>
             </div>
           </div>
           <button class="btn-danger btn-delete-card" data-card-id="${card.id}" style="flex-shrink: 0;">삭제</button>
@@ -840,31 +1209,35 @@ async function renderDeckManage(deckId: string): Promise<void> {
 }
 
 // =========================================================
-// 3. 플래시카드 학습룸 (오른손 엄지용 3/4번 교체 & 버튼 밑 복습 주기 표시)
+// 3. 플래시카드 학습룸 (일반 SM-2 모드 + ⭐ 별표 전용 순수 암기 모드 겸용)
 // =========================================================
 async function renderStudyRoom(): Promise<void> {
-  const data = await api.getStorageData();
-  const deck = data.decks.find(d => d.id === studyingDeckId);
-
-  if (!deck || currentCardIndex >= studyQueue.length) {
+  if (currentCardIndex >= studyQueue.length) {
     stopCardTimer();
     clearSwipeListener();
+    const wasStarCram = isStarCramMode;
+
     appElement!.innerHTML = `
       <div class="container" style="justify-content: center; text-align: center;">
         <div class="card-box" style="padding: 48px 20px;">
-          <h1 style="font-size: 54px; margin: 0 0 12px 0;">🎉</h1>
-          <h2 style="font-size: 22px; margin-bottom: 8px;">오늘의 학습 목표 달성!</h2>
+          <h1 style="font-size: 54px; margin: 0 0 12px 0;">${wasStarCram ? '⭐' : '🎉'}</h1>
+          <h2 style="font-size: 22px; margin-bottom: 8px;">
+            ${wasStarCram ? '별표 중요 단어 복습 완료!' : '오늘의 학습 목표 달성!'}
+          </h2>
           <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 28px;">
-            할당된 <b>${studyQueue.length}개</b>의 카드를 모두 마쳤습니다.<br>Anki 스케줄러에 따라 다음 복습 주기가 정확히 기록되었습니다.
+            ${wasStarCram
+              ? '기존 망각곡선 스케줄에 영향을 주지 않고 별표 단어들을 모두 완벽히 훑어보았습니다!'
+              : `할당된 <b>${studyQueue.length}개</b>의 카드를 모두 마쳤습니다.<br>Anki 스케줄러에 따라 다음 복습 주기가 정확히 기록되었습니다.`}
           </p>
           <button id="btn-finish-study" class="btn-primary" style="width: 100%; padding: 16px; font-size: 16px;">
-            대시보드로 돌아가기
+            ${wasStarCram ? '별표 단어장으로 돌아가기' : '대시보드로 돌아가기'}
           </button>
         </div>
       </div>
     `;
     document.getElementById('btn-finish-study')?.addEventListener('click', () => {
       studyingDeckId = null;
+      isStarCramMode = false;
       render();
     });
     return;
@@ -873,26 +1246,25 @@ async function renderStudyRoom(): Promise<void> {
   const currentCard = studyQueue[currentCardIndex];
   const progressPercent = Math.round(((currentCardIndex + 1) / studyQueue.length) * 100);
   const isStarred = starredCardIds.has(currentCard.id);
-
-  // 각 버튼(1~4)을 눌렀을 때 언제 다시 복습하게 되는지 미리 계산!
   const previewLabels = SM2Scheduler.getPreviewLabels(currentCard, settings);
 
   appElement!.innerHTML = `
     <div class="container">
-      <!-- 상단 바: 좌측에 종료(X)와 설정(⚙️) 배치 -->
       <div class="study-topbar">
         <div style="display: flex; gap: 8px;">
-          <button id="btn-quit-study" class="icon-circle-btn" title="목록으로">✕</button>
+          <button id="btn-quit-study" class="icon-circle-btn" title="나가기">✕</button>
           <button id="btn-open-settings" class="icon-circle-btn" title="설정">⚙️</button>
         </div>
-        <div class="study-counter">${currentCardIndex + 1} / ${studyQueue.length}</div>
+        <div class="study-counter">
+          ${isStarCramMode ? '⭐ 자유 복습 ' : ''}${currentCardIndex + 1} / ${studyQueue.length}
+        </div>
         <div style="min-width: 55px; text-align: right; font-size: 13px; color: var(--text-secondary);" id="study-timer-display">
           ${settings.showTimer ? '⏱️ 0s' : ''}
         </div>
       </div>
 
       <div class="study-progress-track">
-        <div class="study-progress-fill" style="width: ${progressPercent}%;"></div>
+        <div class="study-progress-fill" style="width: ${progressPercent}%; ${isStarCramMode ? 'background: linear-gradient(90deg, #84cc16, #10b981);' : ''}"></div>
       </div>
 
       <div class="study-box" id="study-card-body">
@@ -920,8 +1292,20 @@ async function renderStudyRoom(): Promise<void> {
         <button id="btn-reveal" class="btn-primary" style="width: 100%; padding: 18px; font-size: 17px; border-radius: 16px;">
           정답 확인하기 ${settings.viewMode === 'pc' ? '(Space)' : ''}
         </button>
+      ` : isStarCramMode ? `
+        <!-- ⭐ 별표 전용 순수 플래시카드 버튼 (SM-2 스케줄링 미적용!) -->
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+          <button id="btn-cram-retry" class="btn-rate btn-again" style="padding: 18px 10px;">
+            <b>🔄 다시 보기 (헷갈림)</b>
+            <span class="btn-due-sub">이번 세션 끝에 재출제 [1]</span>
+          </button>
+          <button id="btn-cram-pass" class="btn-rate btn-good" style="padding: 18px 10px;">
+            <b>✅ 외웠음 (통과)</b>
+            <span class="btn-due-sub">스케줄 변경 없이 통과 [3]</span>
+          </button>
+        </div>
       ` : `
-        <!-- 👍 오른손 엄지 최적화 배치: 아랫줄 오른쪽에 가장 많이 누르는 [3. 알맞음] 배치! -->
+        <!-- 👍 일반 SM-2 학습 버튼 (오른손 엄지 최적화: 우측 하단에 3. 알맞음 배치) -->
         <div class="rating-grid">
           <button class="btn-rate btn-again" data-rating="1">
             <b>1. 다시</b>
@@ -960,6 +1344,7 @@ async function renderStudyRoom(): Promise<void> {
     clearSwipeListener();
     window.speechSynthesis?.cancel();
     studyingDeckId = null;
+    isStarCramMode = false;
     render();
   };
 
@@ -978,7 +1363,6 @@ async function renderStudyRoom(): Promise<void> {
     speakText(currentCard.front);
   });
 
-  // 카드 터치 시 앞면 ↔ 뒷면 자유롭게 토글
   document.getElementById('study-card-body')?.addEventListener('click', () => {
     triggerHaptic(10);
     isAnswerRevealed = !isAnswerRevealed;
@@ -997,14 +1381,35 @@ async function renderStudyRoom(): Promise<void> {
     render();
   });
 
-  document.querySelectorAll('.btn-rate').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const targetBtn = e.currentTarget as HTMLButtonElement;
-      const rating = Number(targetBtn.dataset.rating) as ReviewRating;
-      targetBtn.classList.add('btn-pop-active');
-      await handleRatingWithReaction(rating);
+  // 별표 전용 자유 복습 모드 버튼 이벤트
+  if (isStarCramMode) {
+    document.getElementById('btn-cram-retry')?.addEventListener('click', async () => {
+      triggerHaptic(15);
+      lastReactionText = 'One more time 💪';
+      // 헷갈리는 카드는 현재 큐의 맨 끝에 다시 추가하여 외울 때까지 반복!
+      studyQueue.push({ ...currentCard });
+      currentCardIndex++;
+      isAnswerRevealed = false;
+      await render();
     });
-  });
+
+    document.getElementById('btn-cram-pass')?.addEventListener('click', async () => {
+      triggerHaptic(15);
+      lastReactionText = 'Got it! ⭐';
+      currentCardIndex++;
+      isAnswerRevealed = false;
+      await render();
+    });
+  } else {
+    document.querySelectorAll('.btn-rate').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const targetBtn = e.currentTarget as HTMLButtonElement;
+        const rating = Number(targetBtn.dataset.rating) as ReviewRating;
+        targetBtn.classList.add('btn-pop-active');
+        await handleRatingWithReaction(rating);
+      });
+    });
+  }
 
   setKeyboardListener(async (e: KeyboardEvent) => {
     if (isSettingsModalOpen) return;
@@ -1012,6 +1417,9 @@ async function renderStudyRoom(): Promise<void> {
       e.preventDefault();
       isAnswerRevealed = true;
       render();
+    } else if (isAnswerRevealed && isStarCramMode) {
+      if (e.key === '1') document.getElementById('btn-cram-retry')?.click();
+      if (e.key === '3' || e.key === '2' || e.key === '4') document.getElementById('btn-cram-pass')?.click();
     } else if (isAnswerRevealed && ['1', '2', '3', '4'].includes(e.key)) {
       e.preventDefault();
       await handleRatingWithReaction(Number(e.key) as ReviewRating);
@@ -1084,6 +1492,10 @@ async function render(): Promise<void> {
       currentKeyHandler = null;
     }
     await renderDeckManage(selectedDeckId);
+  } else if (currentSubPage === 'today-quota') {
+    await renderTodayQuotaPage();
+  } else if (currentSubPage === 'starred-list') {
+    await renderStarredPage();
   } else {
     if (currentKeyHandler) {
       window.removeEventListener('keydown', currentKeyHandler);
