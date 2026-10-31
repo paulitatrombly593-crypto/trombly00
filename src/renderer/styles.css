@@ -480,3 +480,171 @@ body {
   transform: scale(0.97) !important;
   pointer-events: none;
 }
+
+/* =========================================================
+   🎛️ 전문가용 Anki 사이드바 설정 모달 (좌측 탭 + 우측 폼)
+   ========================================================= */
+.pro-modal-content {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  max-width: 720px;
+  width: 100%;
+  max-height: 88dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+}
+
+.pro-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pro-modal-body {
+  display: flex;
+  flex: 1;
+  min-height: 360px;
+  overflow: hidden;
+}
+
+/* 왼쪽 사이드바 카테고리 */
+.pro-sidebar {
+  width: 165px;
+  background: var(--bg-main);
+  border-right: 1px solid var(--border-color);
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pro-tab-btn {
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+
+.pro-tab-btn.active {
+  background: var(--accent-blue);
+  color: #ffffff;
+}
+
+/* 오른쪽 세부 설정 패널 */
+.pro-panel {
+  flex: 1;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+  gap: 12px;
+}
+
+.setting-row:last-child {
+  border-bottom: none;
+}
+
+.setting-label {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.setting-desc {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.setting-input {
+  width: 105px !important;
+  padding: 8px 10px !important;
+  font-size: 13.5px !important;
+  text-align: right;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+.setting-select {
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+.pro-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-main);
+  gap: 10px;
+}
+
+/* 모바일 작은 화면에서도 좌측 사이드바 유지 및 폭 최적화 */
+@media (max-width: 520px) {
+  .pro-sidebar {
+    width: 118px;
+    padding: 10px 6px;
+  }
+  .pro-tab-btn {
+    font-size: 12px;
+    padding: 10px 8px;
+  }
+  .pro-panel {
+    padding: 14px 12px;
+  }
+  .setting-input {
+    width: 85px !important;
+  }
+}
+
+/* 버튼 아래 복습 예정 주기(가중치) 배지 (모바일에서도 항상 표시!) */
+.btn-due-sub {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.92;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: 2px;
+}
+
+/* 카드 관리 목록 라벨 배지 */
+.tag-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.tag-due-now { background: rgba(244, 63, 94, 0.18); color: #f43f5e; }
+.tag-due-later { background: rgba(59, 130, 246, 0.16); color: #60a5fa; }
+.tag-new { background: rgba(16, 185, 129, 0.16); color: #10b981; }
+.tag-leech { background: rgba(239, 68, 68, 0.25); color: #ef4444; }

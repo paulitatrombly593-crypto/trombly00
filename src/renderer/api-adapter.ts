@@ -1,12 +1,9 @@
 import { IAnkiAPI } from '../shared/api';
-import { StorageSchema, Deck, Card, ReviewRating } from '../shared/types';
-import { SM2Scheduler } from '../core/sm2';
+import { StorageSchema, Deck, Card, ReviewRating, AnkiSettings } from '../shared/types';
+import { SM2Scheduler, DEFAULT_ANKI_SETTINGS } from '../core/sm2';
 
 const WEB_STORAGE_KEY = 'MY_ANKI_APP_DATA_V1';
 
-/**
- * 초기 샘플 데이터 (웹 모드 최초 실행 시)
- */
 const DEFAULT_STORAGE: StorageSchema = {
   version: 1,
   decks: [
@@ -34,7 +31,7 @@ const DEFAULT_STORAGE: StorageSchema = {
           id: 'card_sample_2',
           deckId: 'deck_starter',
           front: 'Cross Platform',
-          back: '크로스 플랫폼 (하나의 코드로 Windows, Mac 등 여러 OS에서 구동되는 소프트웨어)',
+          back: '크로스 플랫폼 (하나의 코드로 여러 OS에서 구동되는 소프트웨어)',
           state: 'new',
           dueDate: new Date().toISOString(),
           interval: 0,
@@ -50,9 +47,6 @@ const DEFAULT_STORAGE: StorageSchema = {
   logs: []
 };
 
-/**
- * Codespaces 웹 브라우저 환경용 로컬 스토리지 구현체
- */
 class WebAnkiAPI implements IAnkiAPI {
   private getLocalData(): StorageSchema {
     try {
@@ -96,7 +90,7 @@ class WebAnkiAPI implements IAnkiAPI {
     this.setLocalData(data);
   }
 
-  public async addCard(deckId: string, front: string, back: string): Promise<Card> {
+  public async addCard(deckId: string, front: string, back: string, startingEase = 250): Promise<Card> {
     const data = this.getLocalData();
     const deck = data.decks.find(d => d.id === deckId);
     if (!deck) {
@@ -111,7 +105,8 @@ class WebAnkiAPI implements IAnkiAPI {
       state: 'new',
       dueDate: new Date().toISOString(),
       interval: 0,
-      easeFactor: 2.5,
+      stepIndex: 0,
+      easeFactor: Number((startingEase / 100).toFixed(2)),
       repetitions: 0,
       lapses: 0,
       createdAt: new Date().toISOString(),
@@ -133,7 +128,13 @@ class WebAnkiAPI implements IAnkiAPI {
     this.setLocalData(data);
   }
 
-  public async reviewCard(deckId: string, cardId: string, rating: ReviewRating): Promise<Card> {
+  public async reviewCard(
+    deckId: string,
+    cardId: string,
+    rating: ReviewRating,
+    settings: AnkiSettings = DEFAULT_ANKI_SETTINGS,
+    durationSeconds?: number
+  ): Promise<Card> {
     const data = this.getLocalData();
     const deck = data.decks.find(d => d.id === deckId);
     if (!deck) {
@@ -146,8 +147,13 @@ class WebAnkiAPI implements IAnkiAPI {
     }
 
     const targetCard = deck.cards[cardIndex];
-    // SM-2 알고리즘으로 다음 주기 계산
-    const { updatedCard, log } = SM2Scheduler.calculate(targetCard, rating);
+    const { updatedCard, log } = SM2Scheduler.calculate(
+      targetCard,
+      rating,
+      new Date(),
+      settings,
+      durationSeconds
+    );
 
     deck.cards[cardIndex] = updatedCard;
     data.logs.push(log);
@@ -161,14 +167,9 @@ class WebAnkiAPI implements IAnkiAPI {
   }
 }
 
-/**
- * 런타임 환경에 따라 알맞은 API를 반환하는 싱글톤 팩토리
- */
 export function getAnkiAPI(): IAnkiAPI {
-  // 실제 Electron 데스크톱 앱 내부인 경우
   if (typeof window !== 'undefined' && window.ankiAPI) {
     return window.ankiAPI;
   }
-  // Codespaces 웹 브라우저 환경인 경우
   return new WebAnkiAPI();
 }
