@@ -955,7 +955,7 @@ async function renderDashboard(): Promise<void> {
     <div class="container">
       <div class="header">
         <div style="display: flex; align-items: center; gap: 10px;">
-          <img src="./charmander.png" alt="단어 해결사" style="width: 38px; height: 38px; image-rendering: pixelated; object-fit: contain;" />
+          <img src="./charmander.svg" alt="단어 해결사" style="width: 38px; height: 38px; image-rendering: pixelated; object-fit: contain;" />
           <div>
             <h2 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">단어 해결사</h2>
             <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">

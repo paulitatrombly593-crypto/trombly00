@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <rect width="16" height="16" fill="none"/>
+  <!-- 꼬리 불꽃 -->
+  <rect x="13" y="1" width="1" height="3" fill="#ef4444"/>
+  <rect x="12" y="2" width="2" height="3" fill="#f97316"/>
+  <rect x="13" y="3" width="1" height="2" fill="#facc15"/>
+  <!-- 외곽선 및 몸통 -->
+  <rect x="4" y="2" width="4" height="1" fill="#27272a"/>
+  <rect x="3" y="3" width="6" height="1" fill="#ea580c"/>
+  <rect x="2" y="4" width="8" height="3" fill="#ea580c"/>
+  <rect x="1" y="5" width="2" height="2" fill="#ea580c"/>
+  <!-- 눈 -->
+  <rect x="5" y="4" width="1" height="2" fill="#0f766e"/>
+  <rect x="5" y="4" width="1" height="1" fill="#ffffff"/>
+  <!-- 볼 / 배 밝은 노란색 -->
+  <rect x="3" y="7" width="2" height="1" fill="#fdba74"/>
+  <rect x="4" y="8" width="3" height="3" fill="#fef08a"/>
+  <rect x="3" y="9" width="1" height="2" fill="#fef08a"/>
+  <!-- 주황색 몸통 -->
+  <rect x="3" y="7" width="6" height="4" fill="#ea580c"/>
+  <rect x="4" y="8" width="2" height="3" fill="#fef08a"/>
+  <!-- 팔, 다리, 꼬리 -->
+  <rect x="2" y="11" width="2" height="2" fill="#ea580c"/>
+  <rect x="7" y="11" width="2" height="2" fill="#ea580c"/>
+  <rect x="9" y="9" width="2" height="3" fill="#ea580c"/>
+  <rect x="11" y="6" width="2" height="4" fill="#ea580c"/>
+  <rect x="12" y="4" width="2" height="3" fill="#ea580c"/>
+  <!-- 발톱 -->
+  <rect x="2" y="13" width="1" height="1" fill="#ffffff"/>
+  <rect x="7" y="13" width="1" height="1" fill="#ffffff"/>
+</svg>
