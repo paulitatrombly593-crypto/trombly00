@@ -75,6 +75,33 @@ function triggerHaptic(ms = 10): void {
   }
 }
 
+// 👈 스크린 왼쪽 드래그(스와이프) 감지 리스너
+let touchStartX = 0;
+let touchStartY = 0;
+
+function attachSwipeBackListener(onSwipeLeft: () => void): void {
+  window.ontouchstart = (e: TouchEvent) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  };
+
+  window.ontouchend = (e: TouchEvent) => {
+    const deltaX = e.changedTouches[0].clientX - touchStartX;
+    const deltaY = e.changedTouches[0].clientY - touchStartY;
+
+    // 가로 이동 거리가 -60px 이하(왼쪽으로 드래그)이고, 세로 스크롤보다 가로 이동이 클 때 작동
+    if (deltaX < -60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      triggerHaptic(15);
+      onSwipeLeft();
+    }
+  };
+}
+
+function clearSwipeListener(): void {
+  window.ontouchstart = null;
+  window.ontouchend = null;
+}
+
 // 초기 테마 및 뷰 모드 적용
 applyPreferences();
 
@@ -412,12 +439,13 @@ async function renderDeckManage(deckId: string): Promise<void> {
 
   appElement!.innerHTML = `
     <div class="container">
-      <div class="header">
-        <h3 style="margin: 0; font-size: 18px; word-break: break-all;">📁 [${escapeHtml(deck.name)}]</h3>
+      <div class="header" style="justify-content: flex-start; gap: 10px;">
+        <!-- 👈 좌측 상단으로 이동한 설정 및 목록(Undo) 버튼 -->
         <div style="display: flex; gap: 6px; flex-shrink: 0;">
-          <button id="btn-open-settings" class="icon-circle-btn">⚙️</button>
           <button id="btn-back" class="btn-secondary" style="font-size: 13px; padding: 8px 12px;">⬅ 목록</button>
+          <button id="btn-open-settings" class="icon-circle-btn">⚙️</button>
         </div>
+        <h3 style="margin: 0; font-size: 18px; word-break: break-all; flex: 1; text-align: right;">📁 [${escapeHtml(deck.name)}]</h3>
       </div>
 
       <div class="card-box">
@@ -453,6 +481,13 @@ async function renderDeckManage(deckId: string): Promise<void> {
   attachSettingsModalEvents();
 
   document.getElementById('btn-back')?.addEventListener('click', () => {
+    selectedDeckId = null;
+    render();
+  });
+
+  // 👈 화면 어디서든 왼쪽으로 드래그하면 목록으로 Undo 복귀!
+  attachSwipeBackListener(() => {
+    clearSwipeListener();
     selectedDeckId = null;
     render();
   });
