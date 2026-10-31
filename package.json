@@ -1,0 +1,22 @@
+{
+  "name": "my-anki-clone",
+  "version": "1.0.0",
+  "description": "Cross-platform Spaced Repetition Flashcard App (SM-2)",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "dev:web": "vite --host 0.0.0.0 --port 5173",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run build:renderer && npm run build:electron",
+    "pack:win": "npm run build && electron-builder --win",
+    "pack:mac": "npm run build && electron-builder --mac"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.4"
+  }
+}
