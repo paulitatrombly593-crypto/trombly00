@@ -85,6 +85,7 @@ let studyQueue: Card[] = [];
 let currentCardIndex = 0;
 let isAnswerRevealed = false;
 let lastReactionText: string = 'Let’s go 🔥'; // 상단 리액션 문구 상태
+let reactionFadeTimer: number | null = null; // 1.5초 자동 소멸용 타이머
 
 let currentKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
@@ -644,13 +645,11 @@ async function renderStudyRoom(): Promise<void> {
     speakText(currentCard.front);
   });
 
-  // 카드 본체 터치 시 바로 정답 뒤집기
+  // 카드 본체 터치 시 앞면 ↔ 뒷면 자유롭게 토글 뒤집기
   document.getElementById('study-card-body')?.addEventListener('click', () => {
-    if (!isAnswerRevealed) {
-      triggerHaptic(10);
-      isAnswerRevealed = true;
-      render();
-    }
+    triggerHaptic(10);
+    isAnswerRevealed = !isAnswerRevealed; // 정답 본 후 다시 누르면 앞면으로 복귀!
+    render();
   });
 
   // 하단 정답 확인 버튼
@@ -725,6 +724,17 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
     if (isAutoSpeak && studyQueue[currentCardIndex]) {
       speakText(studyQueue[currentCardIndex].front);
     }
+
+    // 1.5초 뒤 상단 리액션 배지를 서서히 사라지게 처리
+    if (reactionFadeTimer) clearTimeout(reactionFadeTimer);
+    reactionFadeTimer = window.setTimeout(() => {
+      const badge = document.getElementById('reaction-badge');
+      if (badge) {
+        badge.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+        badge.style.opacity = '0';
+        badge.style.transform = 'translateY(-6px)';
+      }
+    }, 1500);
   }, 180);
 }
 
