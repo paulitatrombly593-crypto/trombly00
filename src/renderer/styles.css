@@ -757,3 +757,87 @@ body.theme-dark.is-scrolling ::-webkit-scrollbar-thumb,
 body.theme-dark *:hover::-webkit-scrollbar-thumb {
   background: rgba(113, 113, 122, 0.65);
 }
+
+/* =========================================================
+   🖼️ 단어 그림(Image) & 예문(Example) 적응형 레이아웃 스타일
+   ========================================================= */
+/* 정답 확인 시 펼쳐지는 뒷면 컨테이너 (그림/예문이 많아도 카드 내부에서 깔끔하게 정렬) */
+.study-back-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  animation: answerFadeIn 0.24s ease-out;
+}
+
+/* 학습 화면 내 압축 이미지 액자 */
+.study-image-frame {
+  max-width: 280px;
+  max-height: 170px;
+  width: auto;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border-color);
+  object-fit: contain;
+  background: var(--bg-main);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 학습 화면 내 예문 인용 박스 */
+.study-example-box {
+  width: 100%;
+  max-width: 520px;
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--accent-blue);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14.5px;
+  color: var(--text-primary);
+  text-align: left;
+  line-height: 1.5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.study-example-text {
+  font-style: italic;
+  word-break: keep-all;
+  flex: 1;
+}
+
+/* 단어 추가 폼의 이미지 첨부 & 클립보드 붙여넣기 영역 */
+.image-upload-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-main);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.image-preview-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--accent-blue);
+}
+
+/* 단어 관리 목록용 미니 썸네일 */
+.manage-card-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+}

@@ -11,8 +11,15 @@ const ankiAPI: IAnkiAPI = {
     ipcRenderer.invoke('storage:create-deck', name, description),
   deleteDeck: (deckId: string): Promise<void> => 
     ipcRenderer.invoke('storage:delete-deck', deckId),
-  addCard: (deckId: string, front: string, back: string): Promise<Card> => 
-    ipcRenderer.invoke('storage:add-card', deckId, front, back),
+  addCard: (
+    deckId: string,
+    front: string,
+    back: string,
+    startingEase?: number,
+    example?: string,
+    imageData?: string
+  ): Promise<Card> =>
+    ipcRenderer.invoke('storage:add-card', deckId, front, back, startingEase, example, imageData),
   deleteCard: (deckId: string, cardId: string): Promise<void> => 
     ipcRenderer.invoke('storage:delete-card', deckId, cardId),
   reviewCard: (deckId: string, cardId: string, rating: ReviewRating): Promise<Card> => 

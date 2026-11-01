@@ -4,7 +4,14 @@ export interface IAnkiAPI {
   getStorageData(): Promise<StorageSchema>;
   createDeck(name: string, description?: string): Promise<Deck>;
   deleteDeck(deckId: string): Promise<void>;
-  addCard(deckId: string, front: string, back: string, startingEase?: number): Promise<Card>;
+  addCard(
+    deckId: string,
+    front: string,
+    back: string,
+    startingEase?: number,
+    example?: string,
+    imageData?: string
+  ): Promise<Card>;
   deleteCard(deckId: string, cardId: string): Promise<void>;
   reviewCard(
     deckId: string,

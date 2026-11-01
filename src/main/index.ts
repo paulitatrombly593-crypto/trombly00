@@ -62,30 +62,43 @@ function registerIpcHandlers(): void {
     Logger.info(`[Deck Deleted] ID: ${deckId}`);
   });
 
-  ipcMain.handle('storage:add-card', async (_, deckId: string, front: string, back: string): Promise<Card> => {
-    const data = StorageManager.load();
-    const deck = data.decks.find(d => d.id === deckId);
-    if (!deck) throw new Error(`Deck not found: ${deckId}`);
+  ipcMain.handle(
+    'storage:add-card',
+    async (
+      _,
+      deckId: string,
+      front: string,
+      back: string,
+      startingEase = 250,
+      example?: string,
+      imageData?: string
+    ): Promise<Card> => {
+      const data = StorageManager.load();
+      const deck = data.decks.find(d => d.id === deckId);
+      if (!deck) throw new Error(`Deck not found: ${deckId}`);
 
-    const newCard: Card = {
-      id: `card_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      deckId,
-      front,
-      back,
-      state: 'new',
-      dueDate: new Date().toISOString(),
-      interval: 0,
-      easeFactor: 2.5,
-      repetitions: 0,
-      lapses: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    deck.cards.push(newCard);
-    StorageManager.save(data);
-    Logger.info(`[Card Added] ${front} to deck ${deck.name}`);
-    return newCard;
-  });
+      const newCard: Card = {
+        id: `card_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        deckId,
+        front,
+        back,
+        example: example || undefined,
+        imageData: imageData || undefined,
+        state: 'new',
+        dueDate: new Date().toISOString(),
+        interval: 0,
+        easeFactor: Number((startingEase / 100).toFixed(2)),
+        repetitions: 0,
+        lapses: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      deck.cards.push(newCard);
+      StorageManager.save(data);
+      Logger.info(`[Card Added] ${front} to deck ${deck.name}`);
+      return newCard;
+    }
+  );
 
   ipcMain.handle('storage:delete-card', async (_, deckId: string, cardId: string): Promise<void> => {
     const data = StorageManager.load();

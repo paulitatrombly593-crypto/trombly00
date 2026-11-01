@@ -1,6 +1,7 @@
 export interface ParsedCardItem {
   front: string;
   back: string;
+  example?: string;
   lineNumber: number;
 }
 
@@ -49,6 +50,7 @@ export class CsvParser {
 
       const front = columns[0].trim();
       const back = columns[1].trim();
+      const example = columns[2] ? columns[2].trim() : undefined;
 
       // 4. 헤더 행(제목) 자동 감지 및 스킵
       if (i === 0 && this.isHeaderRow(front, back)) {
@@ -63,7 +65,7 @@ export class CsvParser {
         continue;
       }
 
-      validCards.push({ front, back, lineNumber });
+      validCards.push({ front, back, example, lineNumber });
     }
 
     return { validCards, skippedCount, errors };

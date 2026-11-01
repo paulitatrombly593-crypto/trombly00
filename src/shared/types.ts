@@ -49,6 +49,8 @@ export interface Card {
   deckId: string;
   front: string;
   back: string;
+  example?: string;         // 예문 (선택)
+  imageData?: string;       // 자체 축소/압축된 Base64 이미지 데이터 (선택)
   state: CardState;
   dueDate: string;          // 다음 복습 예정 일시 (ISO 8601)
   lastReviewedAt?: string;  // 마지막으로 학습한 정확한 일시 (ISO 8601)

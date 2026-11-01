@@ -90,7 +90,14 @@ class WebAnkiAPI implements IAnkiAPI {
     this.setLocalData(data);
   }
 
-  public async addCard(deckId: string, front: string, back: string, startingEase = 250): Promise<Card> {
+  public async addCard(
+    deckId: string,
+    front: string,
+    back: string,
+    startingEase = 250,
+    example?: string,
+    imageData?: string
+  ): Promise<Card> {
     const data = this.getLocalData();
     const deck = data.decks.find(d => d.id === deckId);
     if (!deck) {
@@ -102,6 +109,8 @@ class WebAnkiAPI implements IAnkiAPI {
       deckId,
       front,
       back,
+      example: example || undefined,
+      imageData: imageData || undefined,
       state: 'new',
       dueDate: new Date().toISOString(),
       interval: 0,

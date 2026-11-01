@@ -216,6 +216,56 @@ async function readFileWithAutoEncoding(file: File): Promise<string> {
   return utf8Text;
 }
 
+// 🖼️ 현재 단어 추가 폼에서 선택/붙여넣기된 압축 이미지 임시 보관용 변수
+let pendingCardImageData: string | undefined = undefined;
+
+/**
+ * 프로그램 내장 이미지 축소 및 초경량 압축 엔진 (Canvas 기반)
+ * 원본 이미지를 최대 360px, JPEG 0.75 품질(약 15~25KB)로 즉시 축소합니다.
+ */
+function compressImageToDataUrl(fileOrBlob: File | Blob, maxSize = 360, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Canvas context 생성 실패'));
+
+        // 투명 배경 이미지(PNG)를 대비해 흰색 배경 먼저 채우기
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedDataUrl);
+      };
+      img.onerror = () => reject(new Error('이미지 로드 실패'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('파일 읽기 실패'));
+    reader.readAsDataURL(fileOrBlob);
+  });
+}
+
 function buildDailyStudyQueue(deck: Deck, logs: StorageSchema['logs']): { queue: Card[]; dueNewCount: number; dueRevCount: number } {
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayLogs = logs.filter(l => l.deckId === deck.id && l.reviewDate.startsWith(todayStr));
@@ -1082,9 +1132,6 @@ async function renderDashboard(): Promise<void> {
   });
 }
 
-// =========================================================
-// 2. 단어 관리 화면
-// =========================================================
 async function renderDeckManage(deckId: string): Promise<void> {
   const data = await api.getStorageData();
   const deck = data.decks.find(d => d.id === deckId);
@@ -1099,10 +1146,11 @@ async function renderDeckManage(deckId: string): Promise<void> {
       const badgeClass = card.state === 'new' ? 'tag-new' : (isDueNow ? 'tag-due-now' : 'tag-due-later');
       const lastReviewedStr = SM2Scheduler.formatLastReviewed(card);
       const m = getCardMasteryInfo(card);
-
       const isStar = starredCardIds.has(card.id);
+
       return `
         <div class="deck-item">
+          ${card.imageData ? `<img src="${card.imageData}" class="manage-card-thumb" alt="card image" onerror="this.style.display='none'" />` : ''}
           <div style="flex: 1; min-width: 0;">
             <div style="margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
               <span class="tag-badge ${badgeClass}">${dueBadgeText}</span>
@@ -1115,6 +1163,11 @@ async function renderDeckManage(deckId: string): Promise<void> {
             <div style="color: #60a5fa; margin-top: 3px; word-break: break-all; font-size: 14px;">
               <strong>A:</strong> ${escapeHtml(card.back)}
             </div>
+            ${card.example ? `
+              <div style="color: var(--text-secondary); font-size: 12.5px; margin-top: 4px; font-style: italic; word-break: break-all;">
+                💬 "${escapeHtml(card.example)}"
+              </div>
+            ` : ''}
             <div class="deck-stats" style="margin-top: 6px;">
               🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b> · 수준: <b>${m.levelText}</b>
             </div>
@@ -1142,17 +1195,44 @@ async function renderDeckManage(deckId: string): Promise<void> {
 
       <div class="card-box">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-          <h4 style="margin: 0; font-size: 15px;">✏️ 새 단어 추가</h4>
+          <h4 style="margin: 0; font-size: 15px;">✏️ 새 단어 추가 (예문·그림 지원)</h4>
           <label class="btn-secondary" style="font-size: 12px; padding: 7px 12px; cursor: pointer; border-radius: 10px;">
-            📂 CSV 대량 등록
+            📂 CSV 대량 등록 (단어,뜻,예문)
             <input type="file" id="input-csv-file" accept=".csv, .tsv, .txt" style="display: none;" />
           </label>
         </div>
+
         <div class="form-row">
-          <input type="text" id="input-card-front" placeholder="앞면: 단어/질문 (예: lawn)" />
-          <input type="text" id="input-card-back" placeholder="뒷면: 뜻/정답 (예: 잔디, 잔디밭)" />
-          <button id="btn-add-card" class="btn-primary">단어 추가</button>
+          <input type="text" id="input-card-front" placeholder="앞면: 단어 (예: lawn)" />
+          <input type="text" id="input-card-back" placeholder="뒷면: 뜻 (예: 잔디, 잔디밭)" />
         </div>
+
+        <div style="margin-bottom: 10px;">
+          <input type="text" id="input-card-example" placeholder="💬 예문 (선택 입력, 예: We sat on the green lawn.)" />
+        </div>
+
+        <!-- 📷 이미지 직접 선택 또는 Ctrl+V 붙여넣기 영역 -->
+        <div class="image-upload-zone" id="image-drop-zone">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            ${pendingCardImageData ? `
+              <img src="${pendingCardImageData}" class="image-preview-thumb" alt="preview" />
+              <span style="color: #10b981; font-weight: 600;">✅ 그림 압축 완료!</span>
+            ` : `
+              <span>🖼️ 그림 첨부 (선택): 사진 파일을 고르거나 화면에서 <b>Ctrl+V</b>로 이미지를 붙여넣으세요</span>
+            `}
+          </div>
+          <div style="display: flex; gap: 6px; flex-shrink: 0;">
+            ${pendingCardImageData ? `
+              <button type="button" id="btn-clear-img" class="btn-danger" style="padding: 6px 10px; font-size: 12px;">그림 지우기</button>
+            ` : ''}
+            <label class="btn-secondary" style="padding: 7px 12px; font-size: 12px; cursor: pointer; border-radius: 8px;">
+              📷 사진 선택
+              <input type="file" id="input-card-image" accept="image/*" style="display: none;" />
+            </label>
+          </div>
+        </div>
+
+        <button id="btn-add-card" class="btn-primary" style="width: 100%; padding: 13px;">➕ 단어장에 카드 등록</button>
       </div>
 
       <div class="card-box" style="flex: 1;">
@@ -1164,21 +1244,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
       </div>
     </div>
     ${renderSettingsModalHtml()}
-    ${isQuitConfirmModalOpen ? `
-      <div class="modal-overlay" id="quit-confirm-overlay">
-        <div class="modal-content" style="max-width: 360px; text-align: center;" onclick="event.stopPropagation();">
-          <div style="font-size: 38px; margin-bottom: 8px;">⏸️</div>
-          <h3 style="margin: 0 0 8px 0; font-size: 18px;">학습을 종료하시겠습니까?</h3>
-          <p style="font-size: 13.5px; color: var(--text-secondary); margin: 0 0 22px 0;">
-            지금까지 학습한 카드 기록은 안전하게 저장됩니다.<br>(창 바깥의 빈 공간을 누르면 학습으로 돌아갑니다)
-          </p>
-          <div style="display: flex; gap: 10px;">
-            <button id="btn-cancel-quit" class="btn-secondary" style="flex: 1; padding: 13px;">계속 학습하기</button>
-            <button id="btn-confirm-quit" class="btn-danger" style="flex: 1; padding: 13px; font-size: 14px;">종료하기</button>
-          </div>
-        </div>
-      </div>
-    ` : ''}
   `;
 
   document.getElementById('btn-open-settings')?.addEventListener('click', () => {
@@ -1189,12 +1254,48 @@ async function renderDeckManage(deckId: string): Promise<void> {
 
   const goBackToDashboard = () => {
     clearSwipeListener();
+    window.onpaste = null;
+    pendingCardImageData = undefined;
     selectedDeckId = null;
     render();
   };
 
   document.getElementById('btn-back')?.addEventListener('click', goBackToDashboard);
   attachSwipeBackListener(goBackToDashboard);
+
+  // 📷 사진 파일 선택 시 즉시 초경량 압축
+  const imgInput = document.getElementById('input-card-image') as HTMLInputElement | null;
+  imgInput?.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    try {
+      pendingCardImageData = await compressImageToDataUrl(file);
+      await render();
+    } catch (err) {
+      alert(`이미지 압축 실패: ${(err as Error).message}`);
+    }
+  });
+
+  // 📋 클립보드(Ctrl+V)로 복사한 이미지 바로 붙여넣기 지원
+  window.onpaste = async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          pendingCardImageData = await compressImageToDataUrl(blob);
+          await render();
+          break;
+        }
+      }
+    }
+  };
+
+  document.getElementById('btn-clear-img')?.addEventListener('click', () => {
+    pendingCardImageData = undefined;
+    render();
+  });
 
   document.getElementById('btn-clear-deck-cards')?.addEventListener('click', async () => {
     if (confirm('이 단어장의 모든 카드를 삭제하시겠습니까?')) {
@@ -1205,14 +1306,19 @@ async function renderDeckManage(deckId: string): Promise<void> {
     }
   });
 
+  // 새 단어 카드 추가 (예문 & 압축된 그림 포함)
   document.getElementById('btn-add-card')?.addEventListener('click', async () => {
     const front = (document.getElementById('input-card-front') as HTMLInputElement).value.trim();
     const back = (document.getElementById('input-card-back') as HTMLInputElement).value.trim();
-    if (!front || !back) return alert('앞면과 뒷면을 모두 입력해주세요!');
-    await api.addCard(deck.id, front, back, settings.startingEase);
+    const example = (document.getElementById('input-card-example') as HTMLInputElement).value.trim();
+    if (!front || !back) return alert('앞면(단어)과 뒷면(뜻)을 입력해주세요!');
+
+    await api.addCard(deck.id, front, back, settings.startingEase, example || undefined, pendingCardImageData);
+    pendingCardImageData = undefined;
     await render();
   });
 
+  // CSV 대량 등록 (3번째 열 예문까지 자동 저장)
   const csvInput = document.getElementById('input-csv-file') as HTMLInputElement;
   csvInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -1224,7 +1330,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
       if (!confirm(`총 ${parseResult.validCards.length}개의 단어를 등록하시겠습니까?`)) return;
 
       for (const item of parseResult.validCards) {
-        await api.addCard(deck.id, item.front, item.back, settings.startingEase);
+        await api.addCard(deck.id, item.front, item.back, settings.startingEase, item.example);
       }
       alert(`🎉 ${parseResult.validCards.length}개의 단어가 등록되었습니다!`);
       await render();
@@ -1242,7 +1348,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
       await render();
     });
   });
-}
 
   document.querySelectorAll<HTMLButtonElement>('.btn-manage-star').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1250,6 +1355,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
       render();
     });
   });
+}
 
 // =========================================================
 // 3. 플래시카드 학습룸 (일반 SM-2 모드 + ⭐ 별표 전용 순수 암기 모드 겸용)
@@ -1323,7 +1429,20 @@ async function renderStudyRoom(): Promise<void> {
 
         ${isAnswerRevealed ? `
           <div class="study-divider"></div>
-          <div class="study-answer">${escapeHtml(currentCard.back)}</div>
+          <div class="study-back-container">
+            <div class="study-answer">${escapeHtml(currentCard.back)}</div>
+
+            ${currentCard.imageData ? `
+              <img src="${currentCard.imageData}" class="study-image-frame" alt="visual memory aid" onerror="this.style.display='none'" />
+            ` : ''}
+
+            ${currentCard.example ? `
+              <div class="study-example-box">
+                <div class="study-example-text">💬 "${escapeHtml(currentCard.example)}"</div>
+                <button type="button" id="btn-speak-example" class="icon-circle-btn" style="width: 32px; height: 32px; font-size: 14px; flex-shrink: 0;" title="예문 발음 듣기">🔉</button>
+              </div>
+            ` : ''}
+          </div>
         ` : `
           <div class="tap-guide-hint">💡 카드를 터치하면 뜻이 보입니다</div>
         `}
@@ -1420,6 +1539,14 @@ async function renderStudyRoom(): Promise<void> {
     e.stopPropagation();
     triggerHaptic(10);
     speakText(currentCard.front);
+  });
+
+  document.getElementById('btn-speak-example')?.addEventListener('click', (e) => {
+    e.stopPropagation(); // 카드가 앞면으로 닫히지 않도록 방지
+    if (currentCard.example) {
+      triggerHaptic(10);
+      speakText(currentCard.example);
+    }
   });
 
   document.getElementById('study-card-body')?.addEventListener('click', () => {
