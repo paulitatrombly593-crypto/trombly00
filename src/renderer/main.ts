@@ -48,6 +48,11 @@ interface UndoSnapshot {
 }
 let undoHistoryStack: UndoSnapshot[] = [];
 
+// 📊 현재 학습 세션의 카드별 정답('correct') / 오답('wrong') 기록 맵
+let sessionResultsMap: Map<string, 'correct' | 'wrong'> = new Map();
+let resultFilterTab: 'all' | 'wrong' | 'correct' = 'all'; // 결과 화면 탭 필터
+let editingCardTarget: Card | null = null; // 학습 중 또는 결과 화면에서 수정 중인 카드
+
 // 🔍 단어 관리장 실시간 검색어 상태
 let manageSearchQuery = '';
 
@@ -620,6 +625,8 @@ async function renderStarredPage(): Promise<void> {
     if (starredCards.length === 0) return;
     isStarCramMode = true;
     undoHistoryStack = [];
+    sessionResultsMap.clear();
+    resultFilterTab = 'all';
     studyingDeckId = 'STAR_CRAM_MODE';
     studyQueue = starredCards.map(item => ({ ...item.card }));
     currentCardIndex = 0;
@@ -1137,6 +1144,8 @@ async function renderDashboard(): Promise<void> {
       studySessionSnapshot = JSON.parse(JSON.stringify(freshData));
       saveProgressOnQuit = true;
       undoHistoryStack = [];
+      sessionResultsMap.clear();
+      resultFilterTab = 'all';
 
       isStarCramMode = false;
       studyingDeckId = id;
@@ -1630,29 +1639,292 @@ async function renderStudyRoom(): Promise<void> {
     clearSwipeListener();
     const wasStarCram = isStarCramMode;
 
+    // 최신 저장소 데이터에서 방금 공부한 고유 카드 목록 추출
+    const freshData = await api.getStorageData();
+    const uniqueCardMap = new Map<string, Card>();
+    studyQueue.forEach(qCard => {
+      for (const d of freshData.decks) {
+        const found = d.cards.find(c => c.id === qCard.id);
+        if (found) {
+          uniqueCardMap.set(found.id, found);
+          break;
+        }
+      }
+      if (!uniqueCardMap.has(qCard.id)) uniqueCardMap.set(qCard.id, qCard);
+    });
+
+    const allStudiedCards = [...uniqueCardMap.values()];
+    const wrongCards = allStudiedCards.filter(c => sessionResultsMap.get(c.id) === 'wrong');
+    const correctCards = allStudiedCards.filter(c => sessionResultsMap.get(c.id) !== 'wrong');
+    const accuracyPct = allStudiedCards.length > 0
+      ? Math.round((correctCards.length / allStudiedCards.length) * 100)
+      : 100;
+
+    const displayedCards =
+      resultFilterTab === 'wrong'
+        ? wrongCards
+        : resultFilterTab === 'correct'
+        ? correctCards
+        : allStudiedCards;
+
+    const resultRowsHtml = displayedCards
+      .map(card => {
+        const isWrong = sessionResultsMap.get(card.id) === 'wrong';
+        const isStar = starredCardIds.has(card.id);
+
+        return `
+          <div class="deck-item" style="align-items: center;">
+            ${card.imageData ? `<img src="${card.imageData}" class="manage-card-thumb" alt="thumb" onerror="this.style.display='none'" />` : ''}
+            <div style="flex: 1; min-width: 0; text-align: left;">
+              <div style="margin-bottom: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                <span class="tag-badge ${isWrong ? 'tag-due-now' : 'tag-new'}">
+                  ${isWrong ? '❌ 오답 (다시 봄)' : '⭕ 정답 (암기 통과)'}
+                </span>
+                <span style="font-size: 11px; color: var(--text-secondary);">다음 스케줄: ${SM2Scheduler.formatDueBadge(card)}</span>
+              </div>
+              <div style="font-size: 15px; word-break: break-all;">
+                <strong>Q:</strong> ${formatRichText(card.front, true)}
+              </div>
+              <div style="color: #60a5fa; font-size: 14px; margin-top: 2px; word-break: break-all;">
+                <strong>A:</strong> ${formatRichText(card.back, true)}
+              </div>
+              ${card.example ? `
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px; font-style: italic;">
+                  💬 "${formatRichText(card.example, true)}"
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- 결과 화면에서 바로 사진 등록(📷), 단어 수정(✏️), 별표(★) 조작 -->
+            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+              <label class="btn-secondary" style="padding: 6px 9px; font-size: 12px; cursor: pointer; border-radius: 8px;" title="이 단어에 사진 등록/변경">
+                📷
+                <input type="file" class="result-card-img-input" data-deck-id="${card.deckId}" data-card-id="${card.id}" accept="image/*" style="display: none;" />
+              </label>
+              <button type="button" class="btn-secondary btn-result-edit" data-card-id="${card.id}" style="padding: 6px 10px; font-size: 12px; border-radius: 8px;" title="단어/뜻/예문 즉시 수정">
+                ✏️ 수정
+              </button>
+              <button type="button" class="btn-result-star" data-card-id="${card.id}" style="background: transparent; font-size: 22px; padding: 2px 6px; color: ${isStar ? '#84cc16' : 'var(--text-secondary)'};">
+                ${isStar ? '★' : '☆'}
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    const targetEdit = editingCardTarget || allStudiedCards[0];
+
     appElement!.innerHTML = `
-      <div class="container" style="justify-content: center; text-align: center;">
-        <div class="card-box" style="padding: 48px 20px;">
-          <h1 style="font-size: 54px; margin: 0 0 12px 0;">${wasStarCram ? '⭐' : '🎉'}</h1>
-          <h2 style="font-size: 22px; margin-bottom: 8px;">
-            ${wasStarCram ? '별표 중요 단어 복습 완료!' : '오늘의 학습 목표 달성!'}
-          </h2>
-          <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 28px;">
-            ${wasStarCram
-              ? '기존 망각곡선 스케줄에 영향을 주지 않고 별표 단어들을 모두 완벽히 훑어보았습니다!'
-              : `할당된 <b>${studyQueue.length}개</b>의 카드를 모두 마쳤습니다.<br>Anki 스케줄러에 따라 다음 복습 주기가 정확히 기록되었습니다.`}
-          </p>
-          <button id="btn-finish-study" class="btn-primary" style="width: 100%; padding: 16px; font-size: 16px;">
-            ${wasStarCram ? '별표 단어장으로 돌아가기' : '대시보드로 돌아가기'}
-          </button>
+      <div class="container">
+        <div class="header">
+          <div>
+            <h2 style="margin: 0; font-size: 20px;">📊 학습 결과 리포트</h2>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+              오늘 학습한 단어의 정답·오답 내역을 확인하고, 부족한 단어만 바로 자유 복습하거나 사진·뜻을 수정하세요!
+            </div>
+          </div>
+          <button id="btn-finish-study" class="btn-primary" style="padding: 10px 18px;">🏠 대시보드로 완료</button>
+        </div>
+
+        <!-- 1. 정답률 / 정답 수 / 오답 수 요약 카드 (클릭 시 아래 리스트 필터링) -->
+        <div class="stats-grid">
+          <div class="stat-card stat-card-interactive" id="tab-filter-all" style="${resultFilterTab === 'all' ? 'border-color: var(--accent-blue);' : ''}">
+            <div class="stat-label">🎯 전체 학습 (정답률 ${accuracyPct}%)</div>
+            <div class="stat-value">${allStudiedCards.length}장</div>
+            <div class="stat-action-hint">클릭하여 전체 보기</div>
+          </div>
+          <div class="stat-card stat-card-interactive" id="tab-filter-correct" style="${resultFilterTab === 'correct' ? 'border-color: #10b981;' : ''}">
+            <div class="stat-label">⭕ 맞힌 단어 (정답)</div>
+            <div class="stat-value" style="color: #10b981;">${correctCards.length}장</div>
+            <div class="stat-action-hint">클릭하여 정답만 보기</div>
+          </div>
+          <div class="stat-card stat-card-interactive" id="tab-filter-wrong" style="${resultFilterTab === 'wrong' ? 'border-color: #f43f5e;' : ''}">
+            <div class="stat-label">❌ 틀린 단어 (오답)</div>
+            <div class="stat-value" style="color: #f43f5e;">${wrongCards.length}장</div>
+            <div class="stat-action-hint">클릭하여 오답만 보기</div>
+          </div>
+        </div>
+
+        <!-- 2. SM-2 스케줄 영향 없는 순수 플래시카드 즉시 재복습 버튼 박스 -->
+        <div class="card-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h4 style="margin: 0; font-size: 15px;">⚡ SM-2 제외 순수 플래시카드 바로 복습</h4>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+              기존 복습 주기를 건드리지 않고, 틀린 단어나 맞힌 단어만 카드 형태로 가볍게 다시 테스트합니다.
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" id="btn-cram-wrong-only" class="btn-danger" style="padding: 10px 16px; font-size: 13.5px;" ${wrongCards.length === 0 ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''}>
+              🔥 오답만 바로 복습 (${wrongCards.length}장)
+            </button>
+            <button type="button" id="btn-cram-correct-only" class="btn-primary" style="background: #10b981; padding: 10px 16px; font-size: 13.5px;" ${correctCards.length === 0 ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''}>
+              ✅ 정답만 다시 복습 (${correctCards.length}장)
+            </button>
+            ${wrongCards.length > 0 ? `
+              <button type="button" id="btn-star-all-wrong" class="btn-secondary" style="padding: 10px 14px; font-size: 12.5px;">
+                ⭐ 오답 전체 별표 찍기
+              </button>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- 3. 정답 / 오답 상세 리스트 (사진 등록 & 단어 수정 직접 가능) -->
+        <div class="card-box" style="flex: 1;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h4 style="margin: 0; font-size: 15px;">
+              🗂️ ${resultFilterTab === 'wrong' ? '❌ 오답 단어 리스트' : resultFilterTab === 'correct' ? '⭕ 정답 단어 리스트' : '📋 전체 학습 단어 리스트'} (${displayedCards.length}개)
+            </h4>
+            <span style="font-size: 11.5px; color: var(--text-secondary);">💡 우측 📷 버튼으로 사진 추가, ✏️ 버튼으로 즉시 수정 가능</span>
+          </div>
+          <div style="max-height: 52dvh; overflow-y: auto;">
+            ${resultRowsHtml || '<p style="color: var(--text-secondary); font-size: 14px; text-align: center; padding: 20px 0;">해당하는 단어가 없습니다.</p>'}
+          </div>
         </div>
       </div>
+
+      <!-- ✏️ 결과 화면 내 단어 즉시 수정 모달 -->
+      ${isEditCardModalOpen && targetEdit ? `
+        <div class="modal-overlay" id="result-edit-overlay">
+          <div class="modal-content" style="max-width: 460px;" onclick="event.stopPropagation();">
+            <h3 style="margin: 0 0 12px 0; font-size: 17px;">✏️ 단어 및 사진 즉시 수정</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+              <div>
+                <label style="font-size: 12px; color: var(--text-secondary);">앞면 (단어 또는 {{빈칸}} 문장)</label>
+                <input type="text" id="res-edit-front" value="${escapeHtml(targetEdit.front)}" style="margin-top: 4px;" />
+              </div>
+              <div>
+                <label style="font-size: 12px; color: var(--text-secondary);">뒷면 (뜻, **강조** 가능)</label>
+                <input type="text" id="res-edit-back" value="${escapeHtml(targetEdit.back)}" style="margin-top: 4px;" />
+              </div>
+              <div>
+                <label style="font-size: 12px; color: var(--text-secondary);">예문 (선택)</label>
+                <input type="text" id="res-edit-example" value="${escapeHtml(targetEdit.example || '')}" style="margin-top: 4px;" />
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" id="btn-res-edit-cancel" class="btn-secondary" style="flex: 1;">취소</button>
+              <button type="button" id="btn-res-edit-save" class="btn-primary" style="flex: 1;">저장하기</button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
     `;
+
+    // 탭 필터 전환
+    document.getElementById('tab-filter-all')?.addEventListener('click', () => { resultFilterTab = 'all'; render(); });
+    document.getElementById('tab-filter-correct')?.addEventListener('click', () => { resultFilterTab = 'correct'; render(); });
+    document.getElementById('tab-filter-wrong')?.addEventListener('click', () => { resultFilterTab = 'wrong'; render(); });
+
+    // 대시보드로 완전히 나가기
     document.getElementById('btn-finish-study')?.addEventListener('click', () => {
       studyingDeckId = null;
       isStarCramMode = false;
+      sessionResultsMap.clear();
+      resultFilterTab = 'all';
       render();
     });
+
+    // 🔥 오답만 바로 복습 (SM-2 미적용 자유 복습 플래시카드 모드)
+    document.getElementById('btn-cram-wrong-only')?.addEventListener('click', async () => {
+      if (wrongCards.length === 0) return;
+      isStarCramMode = true;
+      sessionResultsMap.clear();
+      resultFilterTab = 'all';
+      // 순서 외움 방지를 위해 가볍게 섞어서 출제
+      studyQueue = [...wrongCards].sort(() => Math.random() - 0.5);
+      currentCardIndex = 0;
+      isAnswerRevealed = false;
+      triggerReactionBadge('오답 집중 복습 🔥');
+      await render();
+    });
+
+    // ✅ 정답만 다시 복습 (SM-2 미적용 자유 복습 플래시카드 모드)
+    document.getElementById('btn-cram-correct-only')?.addEventListener('click', async () => {
+      if (correctCards.length === 0) return;
+      isStarCramMode = true;
+      sessionResultsMap.clear();
+      resultFilterTab = 'all';
+      studyQueue = [...correctCards].sort(() => Math.random() - 0.5);
+      currentCardIndex = 0;
+      isAnswerRevealed = false;
+      triggerReactionBadge('정답 확인 복습 ✅');
+      await render();
+    });
+
+    // ⭐ 오답 전체 별표 일괄 찍기
+    document.getElementById('btn-star-all-wrong')?.addEventListener('click', () => {
+      wrongCards.forEach(c => starredCardIds.add(c.id));
+      localStorage.setItem(STARRED_CARDS_KEY, JSON.stringify([...starredCardIds]));
+      triggerHaptic(18);
+      alert(`오답 ${wrongCards.length}개 단어에 모두 ⭐ 별표가 표시되었습니다!`);
+      render();
+    });
+
+    // 결과 리스트에서 개별 별표 토글
+    document.querySelectorAll<HTMLButtonElement>('.btn-result-star').forEach(btn => {
+      btn.addEventListener('click', () => {
+        toggleStarCard(btn.dataset.cardId!);
+        render();
+      });
+    });
+
+    // 결과 리스트에서 📷 버튼으로 사진 즉시 등록/변경
+    document.querySelectorAll<HTMLInputElement>('.result-card-img-input').forEach(input => {
+      input.addEventListener('change', async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        const cardId = input.dataset.cardId!;
+        const deckId = input.dataset.deckId!;
+        if (!file || !cardId || !deckId) return;
+        const compressed = await compressImageToDataUrl(file);
+        await api.updateCard(deckId, cardId, { imageData: compressed });
+        // 현재 큐에도 반영
+        const qTarget = studyQueue.find(c => c.id === cardId);
+        if (qTarget) qTarget.imageData = compressed;
+        await render();
+      });
+    });
+
+    // 결과 리스트에서 ✏️ 수정 버튼 클릭 시 모달 오픈
+    document.querySelectorAll<HTMLButtonElement>('.btn-result-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cardId = btn.dataset.cardId!;
+        editingCardTarget = allStudiedCards.find(c => c.id === cardId) || null;
+        isEditCardModalOpen = true;
+        render();
+      });
+    });
+
+    const closeResEdit = () => {
+      isEditCardModalOpen = false;
+      editingCardTarget = null;
+      render();
+    };
+    document.getElementById('result-edit-overlay')?.addEventListener('click', closeResEdit);
+    document.getElementById('btn-res-edit-cancel')?.addEventListener('click', closeResEdit);
+    document.getElementById('btn-res-edit-save')?.addEventListener('click', async () => {
+      if (!targetEdit) return;
+      const newFront = (document.getElementById('res-edit-front') as HTMLInputElement).value.trim();
+      const newBack = (document.getElementById('res-edit-back') as HTMLInputElement).value.trim();
+      const newEx = (document.getElementById('res-edit-example') as HTMLInputElement).value.trim();
+      if (!newFront || !newBack) return alert('앞면과 뒷면을 모두 입력해주세요!');
+
+      await api.updateCard(targetEdit.deckId, targetEdit.id, {
+        front: newFront,
+        back: newBack,
+        example: newEx
+      });
+      const qTarget = studyQueue.find(c => c.id === targetEdit.id);
+      if (qTarget) {
+        qTarget.front = newFront;
+        qTarget.back = newBack;
+        qTarget.example = newEx || undefined;
+      }
+      isEditCardModalOpen = false;
+      editingCardTarget = null;
+      await render();
+    });
+
     return;
   }
 
@@ -1973,6 +2245,8 @@ async function renderStudyRoom(): Promise<void> {
     document.getElementById('btn-cram-retry')?.addEventListener('click', async () => {
       triggerHaptic(15);
       triggerReactionBadge('One more time 💪');
+      // 자유 복습에서 '다시 보기'를 누르면 오답(wrong)으로 기록
+      sessionResultsMap.set(currentCard.id, 'wrong');
       studyQueue.push({ ...currentCard });
       currentCardIndex++;
       isAnswerRevealed = false;
@@ -1982,6 +2256,10 @@ async function renderStudyRoom(): Promise<void> {
     document.getElementById('btn-cram-pass')?.addEventListener('click', async () => {
       triggerHaptic(15);
       triggerReactionBadge('Got it! ⭐');
+      // 이전에 틀린 적이 없을 때만 정답(correct)으로 기록
+      if (!sessionResultsMap.has(currentCard.id)) {
+        sessionResultsMap.set(currentCard.id, 'correct');
+      }
       currentCardIndex++;
       isAnswerRevealed = false;
       await render();
@@ -2000,7 +2278,6 @@ async function renderStudyRoom(): Promise<void> {
   setKeyboardListener(async (e: KeyboardEvent) => {
     if (isSettingsModalOpen || isQuitConfirmModalOpen || isEditCardModalOpen) return;
 
-    // Ctrl + Z 누르면 직전 카드 되돌리기(Undo)!
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
       e.preventDefault();
       await performUndo();
@@ -2016,7 +2293,7 @@ async function renderStudyRoom(): Promise<void> {
       if (e.key === '3' || e.key === '2' || e.key === '4' || e.code === 'Space') document.getElementById('btn-cram-pass')?.click();
     } else if (isAnswerRevealed && (e.code === 'Space' || e.key === ' ' || e.key === 'Enter')) {
       e.preventDefault();
-      await handleRatingWithReaction(3); // Space 한 번 더 누르면 자동으로 알맞음(Good)!
+      await handleRatingWithReaction(3);
     } else if (isAnswerRevealed && ['1', '2', '3', '4'].includes(e.key)) {
       e.preventDefault();
       await handleRatingWithReaction(Number(e.key) as ReviewRating);
@@ -2031,13 +2308,19 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
   const durationSec = stopCardTimer();
   triggerHaptic(18);
 
-  // 평가 직전 상태를 Undo 스택에 저장
   const preStorage = await api.getStorageData();
   undoHistoryStack.push({
     cardIndex: currentCardIndex,
     storageSnapshot: JSON.parse(JSON.stringify(preStorage)),
     queueSnapshot: JSON.parse(JSON.stringify(studyQueue))
   });
+
+  // 📊 1번(다시)을 누르면 오답('wrong'), 2~4번을 누르면 정답('correct')으로 분류 기록!
+  if (rating === 1) {
+    sessionResultsMap.set(currentCard.id, 'wrong');
+  } else if (!sessionResultsMap.has(currentCard.id)) {
+    sessionResultsMap.set(currentCard.id, 'correct');
+  }
 
   const reactionMap: Record<ReviewRating, string> = {
     1: 'Cheer up 💪',
