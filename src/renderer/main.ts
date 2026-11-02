@@ -190,6 +190,8 @@ let isStarCramMode = false;
 let studyQueue: Card[] = [];
 let currentCardIndex = 0;
 let isAnswerRevealed = false;
+let isProcessingRating = false; // 카드 전환 애니메이션 중 중복 입력 잠금
+let lastKeyActionTime = 0; // 기계식 키보드 채터링(0.12초 이내 중복) 방지용 시각
 let lastReactionText: string = '';
 let reactionFadeTimer: number | null = null;
 
@@ -2278,33 +2280,54 @@ async function renderStudyRoom(): Promise<void> {
   setKeyboardListener(async (e: KeyboardEvent) => {
     if (isSettingsModalOpen || isQuitConfirmModalOpen || isEditCardModalOpen) return;
 
+    // 🛑 1. 키보드를 꾹 누르고 있을 때 발생하는 자동 연타(Auto-Repeat)를 100% 차단!
+    // (반드시 손가락을 뗐다가 다시 눌러야만 다음 동작으로 넘어감)
+    if (e.repeat) {
+      e.preventDefault();
+      return;
+    }
+
+    // 🛑 2. 카드 전환 중이거나 0.12초(120ms) 이내의 비정상적 기계 채터링 입력 차단
+    const now = Date.now();
+    if (isProcessingRating || now - lastKeyActionTime < 120) {
+      e.preventDefault();
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
       e.preventDefault();
+      lastKeyActionTime = now;
       await performUndo();
       return;
     }
 
     if (!isAnswerRevealed && (e.code === 'Space' || e.key === ' ')) {
       e.preventDefault();
+      lastKeyActionTime = now;
       isAnswerRevealed = true;
       render();
     } else if (isAnswerRevealed && isStarCramMode) {
+      lastKeyActionTime = now;
       if (e.key === '1') document.getElementById('btn-cram-retry')?.click();
       if (e.key === '3' || e.key === '2' || e.key === '4' || e.code === 'Space') document.getElementById('btn-cram-pass')?.click();
     } else if (isAnswerRevealed && (e.code === 'Space' || e.key === ' ' || e.key === 'Enter')) {
       e.preventDefault();
+      lastKeyActionTime = now;
       await handleRatingWithReaction(3);
     } else if (isAnswerRevealed && ['1', '2', '3', '4'].includes(e.key)) {
       e.preventDefault();
+      lastKeyActionTime = now;
       await handleRatingWithReaction(Number(e.key) as ReviewRating);
     }
   });
 }
 
 async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
+  if (isProcessingRating) return;
   const currentCard = studyQueue[currentCardIndex];
   if (!studyingDeckId || !currentCard) return;
 
+  isProcessingRating = true; // 다음 카드 렌더링 완료 전까지 중복 평가 잠금
   const durationSec = stopCardTimer();
   triggerHaptic(18);
 
@@ -2335,6 +2358,7 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
   setTimeout(async () => {
     currentCardIndex++;
     isAnswerRevealed = false;
+    isProcessingRating = false; // 다음 카드 도착 완료 -> 잠금 해제!
     await render();
 
     if (settings.autoPlayAudio && studyQueue[currentCardIndex]) {
