@@ -131,16 +131,16 @@ button:hover {
 }
 
 button:active {
-  transform: scale(1.06);
+  transform: scale(0.975);
 }
 
 .btn-pop-active {
-  animation: buttonPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: buttonPop 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes buttonPop {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+  0% { transform: scale(0.975); }
+  60% { transform: scale(1.02); }
   100% { transform: scale(1); }
 }
 
@@ -367,7 +367,7 @@ button:active {
 }
 
 @keyframes answerFadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -458,14 +458,18 @@ body {
 }
 
 .container {
-  animation: pageEnter 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: transform, opacity;
+  /* 화면 전체가 흔들리지 않도록 고정 */
+  transform: none;
 }
 
-@keyframes pageEnter {
+.study-box {
+  animation: iosCardGlide 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes iosCardGlide {
   from {
-    opacity: 0.4;
-    transform: scale(0.985);
+    opacity: 0.88;
+    transform: scale(0.994);
   }
   to {
     opacity: 1;
