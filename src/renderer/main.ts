@@ -170,9 +170,27 @@ let isStarCramMode = false; // ⭐ 별표 전용 순수 플래시카드 모드 (
 let studyQueue: Card[] = [];
 let currentCardIndex = 0;
 let isAnswerRevealed = false;
-let lastReactionText: string = 'Let’s go 🔥';
+let lastReactionText: string = ''; // 평소에는 비워두어 화면에 계속 떠있지 않게 함
 let reactionFadeTimer: number | null = null;
+let saveProgressOnQuit = true; // 나가기 전 현재까지의 진도 저장 체크박스 (디폴트: 자동 켜짐)
+let studySessionSnapshot: StorageSchema | null = null; // 진도 미저장 종료 시 복원할 백업본
 
+/**
+ * 리액션 배지를 딱 1.5초만 띄우고 변수까지 완전히 비워서 재렌더링 시 절대 다시 안 뜨게 하는 함수
+ */
+function triggerReactionBadge(text: string): void {
+  lastReactionText = text;
+  if (reactionFadeTimer) clearTimeout(reactionFadeTimer);
+  reactionFadeTimer = window.setTimeout(() => {
+    lastReactionText = ''; // 변수 자체를 비워서 카드 뒤집을 때 다시 안 뜨게 원천 차단!
+    const badge = document.getElementById('reaction-badge');
+    if (badge) {
+      badge.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+      badge.style.opacity = '0';
+      badge.style.transform = 'translateY(-6px)';
+    }
+  }, 1500);
+}
 // 카드당 답변 시간 측정 타이머
 let cardStartTimestamp = Date.now();
 let timerIntervalId: number | null = null;
@@ -1119,12 +1137,16 @@ async function renderDashboard(): Promise<void> {
       const { queue } = buildDailyStudyQueue(targetDeck, freshData.logs);
       if (queue.length === 0) return alert('오늘 목표 할당량을 모두 학습했거나 복습할 카드가 없습니다!');
 
+      // 학습 시작 전 상태 스냅샷 저장 (종료 시 진도 저장 안 함 선택 대비)
+      studySessionSnapshot = JSON.parse(JSON.stringify(freshData));
+      saveProgressOnQuit = true; // 기본값: 항상 자동 저장 체크
+
       isStarCramMode = false;
       studyingDeckId = id;
       studyQueue = queue;
       currentCardIndex = 0;
       isAnswerRevealed = false;
-      lastReactionText = 'Let’s go 🔥';
+      triggerReactionBadge('Let’s go 🔥');
       await render();
       if (settings.autoPlayAudio && studyQueue[0]) {
         speakText(studyQueue[0].front);
@@ -1257,18 +1279,19 @@ async function renderDeckManage(deckId: string): Promise<void> {
       <!-- 🗂️ 등록된 카드 목록 & 드래그 다중 선택 바 -->
       <div class="card-box" style="flex: 1;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-          <div>
-            <h4 style="margin: 0; font-size: 15px;">🗂️ 등록된 카드 (${deck.cards.length}개)</h4>
-            <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
-              💡 카드를 클릭하거나 <b>길게 눌러 위아래로 드래그</b>하면 여러 단어를 한 번에 선택할 수 있습니다.
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="chk-select-all-master" class="card-checkbox" ${deck.cards.length > 0 && selectedCardIds.size === deck.cards.length ? 'checked' : ''} />
+            <div>
+              <h4 style="margin: 0; font-size: 15px;">🗂️ 전체 선택 / 등록된 카드 (${deck.cards.length}개)</h4>
+              <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
+                💡 클릭하여 개별 선택하거나, <b>0.3초 이상 꾹 누른 채 드래그</b>하면 범위가 선택됩니다.
+              </div>
             </div>
-          </div>
+          </label>
           ${deck.cards.length > 0 ? `
-            <div style="display: flex; gap: 6px;">
-              <button id="btn-select-all-cards" class="btn-secondary" style="font-size: 11.5px; padding: 6px 10px;">
-                ${selectedCardIds.size === deck.cards.length ? '전체 해제' : '전체 선택'}
-              </button>
-            </div>
+            <button id="btn-select-all-cards" class="btn-secondary" style="font-size: 11.5px; padding: 6px 12px;">
+              ${selectedCardIds.size === deck.cards.length ? '전체 해제' : '전체 선택'}
+            </button>
           ` : ''}
         </div>
 
@@ -1297,7 +1320,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
     ${renderSettingsModalHtml()}
   `;
 
-  // 타이핑 중인 글자 실시간 보존 (사진 붙여넣기 시 날아가지 않도록)
+  // 타이핑 중인 글자 실시간 보존
   const frontEl = document.getElementById('input-card-front') as HTMLInputElement | null;
   const backEl = document.getElementById('input-card-back') as HTMLInputElement | null;
   const exEl = document.getElementById('input-card-example') as HTMLInputElement | null;
@@ -1342,7 +1365,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
     }
   };
 
-  // 📷 상단 사진 파일 선택
   const imgInput = document.getElementById('input-card-image') as HTMLInputElement | null;
   imgInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -1356,7 +1378,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
     render();
   });
 
-  // 🎯 상단에 붙여넣은 사진을 아래 체크된 단어들에 일괄 적용!
   document.getElementById('btn-apply-img-selected')?.addEventListener('click', async () => {
     if (!pendingCardImageData || selectedCardIds.size === 0) return;
     for (const cardId of selectedCardIds) {
@@ -1368,7 +1389,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
     await render();
   });
 
-  // 🖼️ 선택된 단어들에 파일에서 바로 사진 골라 적용
   const bulkImgInput = document.getElementById('input-bulk-image') as HTMLInputElement | null;
   bulkImgInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -1382,7 +1402,6 @@ async function renderDeckManage(deckId: string): Promise<void> {
     await render();
   });
 
-  // 개별 단어 옆 📷 버튼으로 사진 즉시 넣기/변경
   document.querySelectorAll<HTMLInputElement>('.input-single-card-img').forEach(input => {
     input.addEventListener('change', async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
@@ -1394,15 +1413,17 @@ async function renderDeckManage(deckId: string): Promise<void> {
     });
   });
 
-  // ☑️ 전체 선택 / 전체 해제
-  document.getElementById('btn-select-all-cards')?.addEventListener('click', () => {
+  // ☑️ 전체 선택 마스터 체크박스 & 전체 선택 버튼 동기화
+  const toggleSelectAll = () => {
     if (selectedCardIds.size === deck.cards.length) {
       selectedCardIds.clear();
     } else {
       deck.cards.forEach(c => selectedCardIds.add(c.id));
     }
     render();
-  });
+  };
+  document.getElementById('btn-select-all-cards')?.addEventListener('click', toggleSelectAll);
+  document.getElementById('chk-select-all-master')?.addEventListener('change', toggleSelectAll);
 
   // 🗑️ 선택된 단어 일괄 삭제
   document.getElementById('btn-bulk-delete')?.addEventListener('click', async () => {
@@ -1417,16 +1438,16 @@ async function renderDeckManage(deckId: string): Promise<void> {
   });
 
   // =========================================================
-  // 🖱️👆 클릭 & 길게 눌러 드래그(Range Drag Selection) 다중 선택 구현
+  // 🖱️👆 버그 수정 완료: 짧은 클릭은 단일 토글, 0.3초 이상 꾹 누르고 드래그할 때만 범위 선택!
   // =========================================================
   const rowElements = Array.from(document.querySelectorAll<HTMLElement>('.selectable-card-item'));
-  let isRangeDragging = false;
+  let isLongPressDragActive = false;
   let dragStartIndex = -1;
   let dragTargetSelectState = true;
-  let longPressTimer: number | null = null;
+  let holdTimer: number | null = null;
 
-  const updateRangeSelection = (currentIndex: number) => {
-    if (dragStartIndex === -1) return;
+  const applyRangeSelectionUI = (currentIndex: number) => {
+    if (!isLongPressDragActive || dragStartIndex === -1) return;
     const start = Math.min(dragStartIndex, currentIndex);
     const end = Math.max(dragStartIndex, currentIndex);
     for (let i = start; i <= end; i++) {
@@ -1441,70 +1462,92 @@ async function renderDeckManage(deckId: string): Promise<void> {
     }
   };
 
+  const stopHoldAndDrag = () => {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+    if (isLongPressDragActive) {
+      isLongPressDragActive = false;
+      dragStartIndex = -1;
+      render(); // 드래그가 끝날 때만 상단 선택 개수 바 갱신!
+    }
+  };
+
   rowElements.forEach((row, idx) => {
     const cardId = row.dataset.cardId!;
+    const checkbox = row.querySelector<HTMLInputElement>('.card-checkbox');
 
-    // 1) 일반 클릭 시 선택 토글
+    // 1) 체크박스 직접 클릭
+    checkbox?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (checkbox.checked) selectedCardIds.add(cardId);
+      else selectedCardIds.delete(cardId);
+      render();
+    });
+
+    // 2) 행 짧은 클릭 (단일 선택/해제)
     row.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).tagName === 'LABEL') return;
-      if (isRangeDragging) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'BUTTON' || tag === 'LABEL' || tag === 'INPUT') return;
+      if (isLongPressDragActive) return;
+
       if (selectedCardIds.has(cardId)) selectedCardIds.delete(cardId);
       else selectedCardIds.add(cardId);
       render();
     });
 
-    // 2) PC 마우스 드래그 범위 선택
+    // 3) PC 마우스: 0.3초 꾹 누를 때만 드래그 범위 선택 활성화
     row.addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || (e.target as HTMLElement).tagName === 'BUTTON') return;
-      dragStartIndex = idx;
-      dragTargetSelectState = !selectedCardIds.has(cardId);
+      if (e.button !== 0) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'BUTTON' || tag === 'LABEL' || tag === 'INPUT') return;
+
+      if (holdTimer) clearTimeout(holdTimer);
+      holdTimer = window.setTimeout(() => {
+        isLongPressDragActive = true;
+        dragStartIndex = idx;
+        dragTargetSelectState = !selectedCardIds.has(cardId);
+        triggerHaptic(20);
+        applyRangeSelectionUI(idx);
+      }, 300);
     });
 
     row.addEventListener('mouseenter', () => {
-      if (dragStartIndex !== -1 && dragStartIndex !== idx) {
-        isRangeDragging = true;
-        updateRangeSelection(idx);
+      if (isLongPressDragActive) {
+        applyRangeSelectionUI(idx);
       }
     });
 
-    // 3) 모바일 터치 길게 눌러(0.22초) 위아래로 긁어서 범위 선택
+    // 4) 모바일 터치: 0.3초 꾹 누를 때만 드래그 범위 선택 활성화
     row.addEventListener('touchstart', () => {
-      longPressTimer = window.setTimeout(() => {
-        isRangeDragging = true;
+      if (holdTimer) clearTimeout(holdTimer);
+      holdTimer = window.setTimeout(() => {
+        isLongPressDragActive = true;
         dragStartIndex = idx;
         dragTargetSelectState = !selectedCardIds.has(cardId);
         triggerHaptic(25);
-        updateRangeSelection(idx);
-      }, 220);
+        applyRangeSelectionUI(idx);
+      }, 300);
     }, { passive: true });
 
     row.addEventListener('touchmove', (e: TouchEvent) => {
-      if (!isRangeDragging) {
-        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      if (!isLongPressDragActive) {
+        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
         return;
       }
-      e.preventDefault(); // 범위 드래그 중에는 화면 스크롤 방지
+      e.preventDefault();
       const touch = e.touches[0];
       const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
       const targetRow = targetEl?.closest<HTMLElement>('.selectable-card-item');
       if (targetRow && targetRow.dataset.idx !== undefined) {
-        updateRangeSelection(Number(targetRow.dataset.idx));
+        applyRangeSelectionUI(Number(targetRow.dataset.idx));
       }
     }, { passive: false });
   });
 
-  const finishDragSelection = () => {
-    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-    if (isRangeDragging) {
-      isRangeDragging = false;
-      dragStartIndex = -1;
-      render();
-    } else {
-      dragStartIndex = -1;
-    }
-  };
-  window.addEventListener('mouseup', finishDragSelection, { once: true });
-  window.addEventListener('touchend', finishDragSelection, { once: true });
+  window.onmouseup = stopHoldAndDrag;
+  window.ontouchend = stopHoldAndDrag;
 
   // 새 단어 카드 추가
   document.getElementById('btn-add-card')?.addEventListener('click', async () => {
@@ -1625,21 +1668,14 @@ async function renderStudyRoom(): Promise<void> {
           ${isStarred ? '★' : '☆'}
         </button>
 
-        <div class="card-reaction-badge" id="reaction-badge">
-          ${lastReactionText}
-        </div>
-
-        <!-- 1. 정답 확인 시 가장 상단에 카드 가로폭 60% 크기의 시원한 사진 배치 -->
-        ${isAnswerRevealed && currentCard.imageData ? `
-          <div class="study-top-image-wrap">
-            <img src="${currentCard.imageData}" class="study-top-image" alt="visual memory aid" onerror="this.parentElement.style.display='none'" />
+        ${lastReactionText ? `
+          <div class="card-reaction-badge" id="reaction-badge">
+            ${lastReactionText}
           </div>
         ` : ''}
 
-        <!-- 2. 중간: 영어 단어 -->
         <div class="study-question">${escapeHtml(currentCard.front)}</div>
 
-        <!-- 3. 그 밑에 뜻 & 4. 맨 밑에 예문 (있는 경우) -->
         ${isAnswerRevealed ? `
           <div class="study-divider"></div>
           <div class="study-back-container">
@@ -1665,7 +1701,6 @@ async function renderStudyRoom(): Promise<void> {
           정답 확인하기 ${settings.viewMode === 'pc' ? '(Space)' : ''}
         </button>
       ` : isStarCramMode ? `
-        <!-- ⭐ 별표 전용 순수 플래시카드 버튼 (SM-2 스케줄링 미적용!) -->
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
           <button id="btn-cram-retry" class="btn-rate btn-again" style="padding: 18px 10px;">
             <b>🔄 다시 보기 (헷갈림)</b>
@@ -1677,7 +1712,6 @@ async function renderStudyRoom(): Promise<void> {
           </button>
         </div>
       ` : `
-        <!-- 👍 일반 SM-2 학습 버튼 (오른손 엄지 최적화: 우측 하단에 3. 알맞음 배치) -->
         <div class="rating-grid">
           <button class="btn-rate btn-again" data-rating="1">
             <b>1. 다시</b>
@@ -1699,6 +1733,29 @@ async function renderStudyRoom(): Promise<void> {
       `}
     </div>
     ${renderSettingsModalHtml()}
+
+    <!-- 🛑 ✕ 버튼 클릭 시 뜨는 종료 확인 상자 (진도 저장 체크박스 포함) -->
+    ${isQuitConfirmModalOpen ? `
+      <div class="modal-overlay" id="quit-confirm-overlay">
+        <div class="modal-content" style="max-width: 380px; text-align: center;" onclick="event.stopPropagation();">
+          <div style="font-size: 38px; margin-bottom: 8px;">⏸️</div>
+          <h3 style="margin: 0 0 8px 0; font-size: 18px;">학습을 종료하시겠습니까?</h3>
+          <p style="font-size: 13px; color: var(--text-secondary); margin: 0 0 16px 0;">
+            창 바깥의 빈 공간을 클릭하면 다시 학습으로 돌아갑니다.
+          </p>
+
+          <label class="radio-option" style="justify-content: center; margin-bottom: 20px; background: var(--bg-main);">
+            <input type="checkbox" id="chk-save-progress-quit" ${saveProgressOnQuit ? 'checked' : ''} />
+            <span style="font-size: 13.5px; font-weight: 600;">현재까지의 학습 진도 저장하기</span>
+          </label>
+
+          <div style="display: flex; gap: 10px;">
+            <button type="button" id="btn-cancel-quit" class="btn-secondary" style="flex: 1; padding: 13px;">취소 (계속 학습)</button>
+            <button type="button" id="btn-confirm-quit" class="btn-danger" style="flex: 1; padding: 13px; font-size: 14px;">Yes (학습 종료)</button>
+          </div>
+        </div>
+      </div>
+    ` : ''}
   `;
 
   if (!isAnswerRevealed) {
@@ -1711,14 +1768,34 @@ async function renderStudyRoom(): Promise<void> {
   });
   attachSettingsModalEvents();
 
-  // 학습 화면에서는 드래그(스와이프)로 실수로 나가지지 않도록 리스너 완전 해제!
-  clearSwipeListener();
+  clearSwipeListener(); // 학습 화면에서는 드래그 실수 방지
 
-  // X 버튼을 누르면 바로 나가지 않고 확인 상자 오픈
-  document.getElementById('btn-quit-study')?.addEventListener('click', () => {
+  // ✕ 버튼 클릭 시 -> 종료 확인 메시지 창 오픈
+  document.getElementById('btn-quit-study')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     triggerHaptic(12);
+    saveProgressOnQuit = true;
     isQuitConfirmModalOpen = true;
     render();
+  });
+
+  document.getElementById('chk-save-progress-quit')?.addEventListener('change', (e) => {
+    saveProgressOnQuit = (e.target as HTMLInputElement).checked;
+  });
+
+
+  // Yes 버튼 클릭 시 -> 진도 저장 여부에 따라 롤백 또는 유지 후 종료!
+  document.getElementById('btn-confirm-quit')?.addEventListener('click', async () => {
+    if (!saveProgressOnQuit && studySessionSnapshot) {
+      await api.importStorageData(studySessionSnapshot);
+    }
+    isQuitConfirmModalOpen = false;
+    studySessionSnapshot = null;
+    stopCardTimer();
+    window.speechSynthesis?.cancel();
+    studyingDeckId = null;
+    isStarCramMode = false;
+    await render();
   });
 
   // 확인 상자 바깥 빈 공간 클릭 또는 [계속 학습하기] 클릭 시 취소 및 복귀
@@ -1836,16 +1913,7 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
     3: 'Good 👍',
     4: 'Awesome 🚀'
   };
-  lastReactionText = reactionMap[rating];
-
-  const badgeEl = document.getElementById('reaction-badge');
-  if (badgeEl) {
-    badgeEl.textContent = lastReactionText;
-    badgeEl.style.opacity = '1';
-    badgeEl.style.animation = 'none';
-    void badgeEl.offsetWidth;
-    badgeEl.style.animation = 'reactionPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)';
-  }
+  triggerReactionBadge(reactionMap[rating]);
 
   await api.reviewCard(studyingDeckId, currentCard.id, rating, settings, durationSec);
 
