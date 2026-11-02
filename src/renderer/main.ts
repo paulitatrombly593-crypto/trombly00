@@ -1674,6 +1674,12 @@ async function renderStudyRoom(): Promise<void> {
           </div>
         ` : ''}
 
+        ${isAnswerRevealed && currentCard.imageData ? `
+          <div class="study-top-image-wrap">
+            <img src="${currentCard.imageData}" class="study-top-image" alt="visual memory aid" onerror="this.parentElement.style.display='none'" />
+          </div>
+        ` : ''}
+
         <div class="study-question">${escapeHtml(currentCard.front)}</div>
 
         ${isAnswerRevealed ? `
@@ -1750,7 +1756,7 @@ async function renderStudyRoom(): Promise<void> {
           </label>
 
           <div style="display: flex; gap: 10px;">
-            <button type="button" id="btn-cancel-quit" class="btn-secondary" style="flex: 1; padding: 13px;">취소 (계속 학습)</button>
+            <button type="button" id="btn-cancel-quit" class="btn-secondary" style="flex: 1; padding: 13px;">No (계속 학습)</button>
             <button type="button" id="btn-confirm-quit" class="btn-danger" style="flex: 1; padding: 13px; font-size: 14px;">Yes (학습 종료)</button>
           </div>
         </div>
