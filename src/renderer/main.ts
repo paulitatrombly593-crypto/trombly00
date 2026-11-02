@@ -86,37 +86,21 @@ applyDisplayClasses();
 // =========================================================
 function getCardMasteryInfo(card: Card): {
   levelText: string;
+  levelClass: string;
   progressPct: number;
   barColor: string;
-  ezText: string;
-  ezClass: string;
 } {
-  const easePct = Math.round((card.easeFactor || 2.5) * 100);
-  let ezText = `EZ ${easePct}% (표준)`;
-  let ezClass = 'ez-normal';
-
-  if (easePct >= 260) {
-    ezText = `🟢 EZ Zone (${easePct}%)`;
-    ezClass = 'ez-high';
-  } else if (easePct <= 210) {
-    ezText = `🔴 Hard Zone (${easePct}%)`;
-    ezClass = 'ez-hard';
-  } else {
-    ezText = `🔵 Normal Zone (${easePct}%)`;
-    ezClass = 'ez-normal';
-  }
-
   if (card.state === 'new') {
-    return { levelText: '🌱 미학습 (Lv.0)', progressPct: 5, barColor: '#94a3b8', ezText, ezClass };
+    return { levelText: '🌱 미학습 (Lv.0)', levelClass: 'level-lv0', progressPct: 5, barColor: '#94a3b8' };
   }
   if (card.state === 'learning' || card.state === 'relearning' || card.interval < 3) {
-    return { levelText: '🔥 단기암기 (Lv.1)', progressPct: 30, barColor: '#f97316', ezText, ezClass };
+    return { levelText: '🔥 단기암기 (Lv.1)', levelClass: 'level-lv1', progressPct: 30, barColor: '#f97316' };
   }
   if (card.interval < 21) {
     const pct = Math.min(85, 35 + Math.round((card.interval / 21) * 50));
-    return { levelText: '⚡ 장기기억 진입 (Lv.2)', progressPct: pct, barColor: '#3b82f6', ezText, ezClass };
+    return { levelText: '⚡ 장기기억 진입 (Lv.2)', levelClass: 'level-lv2', progressPct: pct, barColor: '#06b6d4' };
   }
-  return { levelText: '👑 완전 마스터 (Lv.3)', progressPct: 100, barColor: '#10b981', ezText, ezClass };
+  return { levelText: '👑 완전 마스터 (Lv.3)', levelClass: 'level-lv3', progressPct: 100, barColor: '#10b981' };
 }
 
 // =========================================================
@@ -354,9 +338,8 @@ function renderAllCardsModalHtml(decks: Deck[]): string {
       <div class="deck-item" style="flex-direction: column; align-items: stretch; gap: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-            <span class="tag-badge tag-due-later">📁 ${escapeHtml(deckName)}</span>
-            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
-            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+            <span class="badge-deck-category">📁 ${escapeHtml(deckName)}</span>
+            <span class="ez-badge ${m.levelClass}">${m.levelText}</span>
           </div>
           <button class="btn-modal-star" data-card-id="${card.id}" style="background:transparent; font-size:20px; padding:2px 6px; color:${isStar ? '#84cc16' : 'var(--text-secondary)'};">
             ${isStar ? '★' : '☆'}
@@ -441,10 +424,9 @@ async function renderTodayQuotaPage(): Promise<void> {
     return `
       <div class="deck-item" style="flex-direction: column; align-items: stretch; gap: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
-          <div>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             ${typeBadge}
-            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
-            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
+            <span class="ez-badge ${m.levelClass}">${m.levelText}</span>
           </div>
           <span style="font-size: 11px; color: var(--text-secondary);">🕒 완료 시각: ${timeStr}</span>
         </div>
@@ -470,10 +452,10 @@ async function renderTodayQuotaPage(): Promise<void> {
     return `
       <div class="deck-item">
         <div style="flex: 1; min-width: 0;">
-          <div style="margin-bottom: 4px; display: flex; gap: 4px; flex-wrap: wrap;">
+          <div style="margin-bottom: 4px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <span class="badge-deck-category">📁 ${escapeHtml(deckName)}</span>
             <span class="tag-badge ${isNew ? 'tag-new' : 'tag-due-now'}">${isNew ? '🌱 신규 배정' : '🔥 복습 대기'}</span>
-            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
-            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
+            <span class="ez-badge ${m.levelClass}">${m.levelText}</span>
           </div>
           <div style="font-size: 15px; word-break: break-all;">
             <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
@@ -558,10 +540,9 @@ async function renderStarredPage(): Promise<void> {
     return `
       <div class="deck-item">
         <div style="flex: 1; min-width: 0;">
-          <div style="margin-bottom: 4px; display: flex; gap: 4px; flex-wrap: wrap;">
-            <span class="tag-badge tag-due-later">📁 ${escapeHtml(deckName)}</span>
-            <span class="ez-badge ${m.ezClass}">${m.levelText}</span>
-            <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+          <div style="margin-bottom: 4px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <span class="badge-deck-category">📁 ${escapeHtml(deckName)}</span>
+            <span class="ez-badge ${m.levelClass}">${m.levelText}</span>
           </div>
           <div style="font-size: 15.5px; word-break: break-all;">
             ⭐ <strong>Q:</strong> ${formatRichText(card.front, true)}
@@ -1199,9 +1180,9 @@ async function renderDeckManage(deckId: string): Promise<void> {
           <input type="checkbox" class="card-checkbox" data-card-id="${card.id}" ${isSelected ? 'checked' : ''} />
           ${card.imageData ? `<img src="${card.imageData}" class="manage-card-thumb" alt="card image" onerror="this.style.display='none'" />` : ''}
           <div style="flex: 1; min-width: 0;">
-            <div style="margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+            <div style="margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
               <span class="tag-badge ${badgeClass}">${dueBadgeText}</span>
-              <span class="ez-badge ${m.ezClass}">${m.ezText}</span>
+              <span class="ez-badge ${m.levelClass}">${m.levelText}</span>
               ${card.isLeech ? `<span class="tag-badge tag-leech">🩸 거머리(${card.lapses}회 실패)</span>` : ''}
             </div>
             <div style="word-break: break-all; font-size: 15px;">
