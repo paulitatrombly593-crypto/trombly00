@@ -1039,3 +1039,80 @@ body.mode-mobile .glass-pill-btn {
   padding: 10px 14px !important;
   font-size: 13px !important;
 }
+
+/* =========================================================
+   🧩 {{빈칸}} (Cloze Deletion) & 하단 Edit / Undo / 검색바 스타일
+   ========================================================= */
+.cloze-blank {
+  display: inline-block;
+  padding: 2px 10px;
+  margin: 0 2px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.14);
+  color: #2563eb;
+  font-weight: 800;
+  border: 1px dashed rgba(59, 130, 246, 0.5);
+}
+
+body.theme-dark .cloze-blank {
+  background: rgba(96, 165, 250, 0.18);
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.cloze-revealed {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 0 2px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.16);
+  color: #059669;
+  font-weight: 800;
+}
+
+body.theme-dark .cloze-revealed {
+  background: rgba(16, 185, 129, 0.22);
+  color: #34d399;
+}
+
+/* 학습 화면 하단 전체 래퍼 (좌측 Edit, 중앙 1~4 구슬 버튼, 우측 Undo) */
+.study-footer-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 100%;
+  gap: 12px;
+  padding: 4px 0 8px 0;
+}
+
+.side-glass-btn {
+  min-width: 72px !important;
+  padding: 8px 16px !important;
+  font-size: 12.5px !important;
+  opacity: 0.85;
+}
+
+.side-glass-btn:hover {
+  opacity: 1;
+}
+
+/* 단어 관리장 실시간 검색창 */
+.search-input-wrap {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.search-input-wrap input {
+  padding-left: 36px !important;
+  background: var(--bg-main);
+}
+
+.search-icon-prefix {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  opacity: 0.6;
+  pointer-events: none;
+}
