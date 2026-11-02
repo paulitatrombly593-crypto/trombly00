@@ -12,6 +12,8 @@ export interface IAnkiAPI {
     example?: string,
     imageData?: string
   ): Promise<Card>;
+  updateCard(deckId: string, cardId: string, updates: Partial<Pick<Card, 'front' | 'back' | 'example' | 'imageData'>>): Promise<Card>;
+  
   deleteCard(deckId: string, cardId: string): Promise<void>;
   reviewCard(
     deckId: string,

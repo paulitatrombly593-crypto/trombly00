@@ -20,6 +20,8 @@ const ankiAPI: IAnkiAPI = {
     imageData?: string
   ): Promise<Card> =>
     ipcRenderer.invoke('storage:add-card', deckId, front, back, startingEase, example, imageData),
+  updateCard: (deckId, cardId, updates): Promise<Card> =>
+    ipcRenderer.invoke('storage:update-card', deckId, cardId, updates),
   deleteCard: (deckId: string, cardId: string): Promise<void> => 
     ipcRenderer.invoke('storage:delete-card', deckId, cardId),
   reviewCard: (deckId: string, cardId: string, rating: ReviewRating): Promise<Card> => 

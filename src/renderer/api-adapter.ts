@@ -127,6 +127,28 @@ class WebAnkiAPI implements IAnkiAPI {
     return newCard;
   }
 
+  public async updateCard(
+    deckId: string,
+    cardId: string,
+    updates: Partial<Pick<Card, 'front' | 'back' | 'example' | 'imageData'>>
+  ): Promise<Card> {
+    const data = this.getLocalData();
+    const deck = data.decks.find(d => d.id === deckId);
+    if (!deck) throw new Error(`[Error] 덱을 찾을 수 없습니다: ${deckId}`);
+
+    const card = deck.cards.find(c => c.id === cardId);
+    if (!card) throw new Error(`[Error] 카드를 찾을 수 없습니다: ${cardId}`);
+
+    if (updates.front !== undefined) card.front = updates.front;
+    if (updates.back !== undefined) card.back = updates.back;
+    if (updates.example !== undefined) card.example = updates.example || undefined;
+    if (updates.imageData !== undefined) card.imageData = updates.imageData || undefined;
+    card.updatedAt = new Date().toISOString();
+
+    this.setLocalData(data);
+    return card;
+  }
+  
   public async deleteCard(deckId: string, cardId: string): Promise<void> {
     const data = this.getLocalData();
     const deck = data.decks.find(d => d.id === deckId);

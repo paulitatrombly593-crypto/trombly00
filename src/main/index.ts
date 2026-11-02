@@ -100,6 +100,21 @@ function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle(
+    'storage:update-card',
+    async (_, deckId: string, cardId: string, updates: Partial<Card>): Promise<Card> => {
+      const data = StorageManager.load();
+      const deck = data.decks.find(d => d.id === deckId);
+      if (!deck) throw new Error(`Deck not found: ${deckId}`);
+      const card = deck.cards.find(c => c.id === cardId);
+      if (!card) throw new Error(`Card not found: ${cardId}`);
+
+      Object.assign(card, updates, { updatedAt: new Date().toISOString() });
+      StorageManager.save(data);
+      return card;
+    }
+  );
+
   ipcMain.handle('storage:delete-card', async (_, deckId: string, cardId: string): Promise<void> => {
     const data = StorageManager.load();
     const deck = data.decks.find(d => d.id === deckId);

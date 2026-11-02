@@ -216,14 +216,17 @@ async function readFileWithAutoEncoding(file: File): Promise<string> {
   return utf8Text;
 }
 
-// 🖼️ 현재 단어 추가 폼에서 선택/붙여넣기된 압축 이미지 임시 보관용 변수
+// 🖼️ 새 단어 입력폼 상태 보존 및 다중 선택(드래그 범위 선택) 상태 관리
 let pendingCardImageData: string | undefined = undefined;
+let draftFrontText = '';
+let draftBackText = '';
+let draftExampleText = '';
+let selectedCardIds: Set<string> = new Set(); // 다중 선택된 카드 ID 목록
 
 /**
- * 프로그램 내장 이미지 축소 및 초경량 압축 엔진 (Canvas 기반)
- * 원본 이미지를 최대 360px, JPEG 0.75 품질(약 15~25KB)로 즉시 축소합니다.
+ * 프로그램 내장 이미지 축소 엔진 (가로 60% 대형 표시에 맞춰 600px 선명한 화질로 축소)
  */
-function compressImageToDataUrl(fileOrBlob: File | Blob, maxSize = 360, quality = 0.75): Promise<string> {
+function compressImageToDataUrl(fileOrBlob: File | Blob, maxSize = 600, quality = 0.82): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -250,13 +253,11 @@ function compressImageToDataUrl(fileOrBlob: File | Blob, maxSize = 360, quality 
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('Canvas context 생성 실패'));
 
-        // 투명 배경 이미지(PNG)를 대비해 흰색 배경 먼저 채우기
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressedDataUrl);
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = () => reject(new Error('이미지 로드 실패'));
       img.src = e.target?.result as string;
@@ -1137,19 +1138,25 @@ async function renderDeckManage(deckId: string): Promise<void> {
   const deck = data.decks.find(d => d.id === deckId);
   if (!deck) { selectedDeckId = null; await renderDashboard(); return; }
 
+  // 현재 덱에 없는 카드 ID는 선택 목록에서 정리
+  const validIds = new Set(deck.cards.map(c => c.id));
+  selectedCardIds.forEach(id => { if (!validIds.has(id)) selectedCardIds.delete(id); });
+
   const now = new Date();
 
   const cardRowsHtml = deck.cards
-    .map(card => {
+    .map((card, idx) => {
       const dueBadgeText = SM2Scheduler.formatDueBadge(card, now);
       const isDueNow = SM2Scheduler.isDue(card, now) && card.state !== 'new';
       const badgeClass = card.state === 'new' ? 'tag-new' : (isDueNow ? 'tag-due-now' : 'tag-due-later');
       const lastReviewedStr = SM2Scheduler.formatLastReviewed(card);
       const m = getCardMasteryInfo(card);
       const isStar = starredCardIds.has(card.id);
+      const isSelected = selectedCardIds.has(card.id);
 
       return `
-        <div class="deck-item">
+        <div class="deck-item selectable-card-item ${isSelected ? 'selected-row' : ''}" data-card-id="${card.id}" data-idx="${idx}">
+          <input type="checkbox" class="card-checkbox" data-card-id="${card.id}" ${isSelected ? 'checked' : ''} />
           ${card.imageData ? `<img src="${card.imageData}" class="manage-card-thumb" alt="card image" onerror="this.style.display='none'" />` : ''}
           <div style="flex: 1; min-width: 0;">
             <div style="margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
@@ -1172,8 +1179,12 @@ async function renderDeckManage(deckId: string): Promise<void> {
               🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b> · 수준: <b>${m.levelText}</b>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-            <button class="btn-manage-star" data-card-id="${card.id}" title="중요 단어 별표" style="background: transparent; font-size: 24px; padding: 4px 8px; color: ${isStar ? '#84cc16' : 'var(--text-secondary)'};">
+          <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;" onclick="event.stopPropagation();">
+            <label class="btn-secondary" style="padding: 6px 9px; font-size: 12px; cursor: pointer; border-radius: 8px;" title="이 단어에 사진 넣기/변경">
+              📷
+              <input type="file" class="input-single-card-img" data-card-id="${card.id}" accept="image/*" style="display: none;" />
+            </label>
+            <button class="btn-manage-star" data-card-id="${card.id}" title="중요 단어 별표" style="background: transparent; font-size: 23px; padding: 2px 6px; color: ${isStar ? '#84cc16' : 'var(--text-secondary)'};">
               ${isStar ? '★' : '☆'}
             </button>
             <button class="btn-danger btn-delete-card" data-card-id="${card.id}">삭제</button>
@@ -1195,7 +1206,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
 
       <div class="card-box">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-          <h4 style="margin: 0; font-size: 15px;">✏️ 새 단어 추가 (예문·그림 지원)</h4>
+          <h4 style="margin: 0; font-size: 15px;">✏️ 새 단어 추가 &amp; 사진 붙여넣기 (Ctrl+V)</h4>
           <label class="btn-secondary" style="font-size: 12px; padding: 7px 12px; cursor: pointer; border-radius: 10px;">
             📂 CSV 대량 등록 (단어,뜻,예문)
             <input type="file" id="input-csv-file" accept=".csv, .tsv, .txt" style="display: none;" />
@@ -1203,48 +1214,96 @@ async function renderDeckManage(deckId: string): Promise<void> {
         </div>
 
         <div class="form-row">
-          <input type="text" id="input-card-front" placeholder="앞면: 단어 (예: lawn)" />
-          <input type="text" id="input-card-back" placeholder="뒷면: 뜻 (예: 잔디, 잔디밭)" />
+          <input type="text" id="input-card-front" placeholder="앞면: 단어 (예: tow)" value="${escapeHtml(draftFrontText)}" />
+          <input type="text" id="input-card-back" placeholder="뒷면: 뜻 (예: 견인하다)" value="${escapeHtml(draftBackText)}" />
         </div>
 
         <div style="margin-bottom: 10px;">
-          <input type="text" id="input-card-example" placeholder="💬 예문 (선택 입력, 예: We sat on the green lawn.)" />
+          <input type="text" id="input-card-example" placeholder="💬 예문 (선택 입력, 예: The car was broken and needed a tow.)" value="${escapeHtml(draftExampleText)}" />
         </div>
 
         <!-- 📷 이미지 직접 선택 또는 Ctrl+V 붙여넣기 영역 -->
-        <div class="image-upload-zone" id="image-drop-zone">
-          <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="image-upload-zone" id="image-drop-zone" tabindex="0" style="outline: none;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             ${pendingCardImageData ? `
-              <img src="${pendingCardImageData}" class="image-preview-thumb" alt="preview" />
-              <span style="color: #10b981; font-weight: 600;">✅ 그림 압축 완료!</span>
+              <img src="${pendingCardImageData}" class="image-preview-thumb" style="width: 64px; height: 64px;" alt="preview" />
+              <div>
+                <div style="color: #10b981; font-weight: 700; font-size: 13.5px;">✅ 이미지 준비 완료!</div>
+                <div style="font-size: 11.5px; color: var(--text-secondary);">새 카드로 등록하거나, 아래 목록에서 단어를 체크해 이 사진을 입힐 수 있습니다.</div>
+              </div>
             ` : `
-              <span>🖼️ 그림 첨부 (선택): 사진 파일을 고르거나 화면에서 <b>Ctrl+V</b>로 이미지를 붙여넣으세요</span>
+              <span>🖼️ <b>사진 첨부:</b> 이 화면 어디서든 <b>Ctrl + V</b>를 누르면 클립보드 이미지가 즉시 들어갑니다!</span>
             `}
           </div>
-          <div style="display: flex; gap: 6px; flex-shrink: 0;">
+          <div style="display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap;">
+            ${pendingCardImageData && selectedCardIds.size > 0 ? `
+              <button type="button" id="btn-apply-img-selected" class="btn-primary" style="background: #10b981; padding: 7px 12px; font-size: 12px;">
+                🎯 선택된 ${selectedCardIds.size}개 단어에 이 사진 적용
+              </button>
+            ` : ''}
             ${pendingCardImageData ? `
-              <button type="button" id="btn-clear-img" class="btn-danger" style="padding: 6px 10px; font-size: 12px;">그림 지우기</button>
+              <button type="button" id="btn-clear-img" class="btn-danger" style="padding: 6px 10px; font-size: 12px;">사진 비우기</button>
             ` : ''}
             <label class="btn-secondary" style="padding: 7px 12px; font-size: 12px; cursor: pointer; border-radius: 8px;">
-              📷 사진 선택
+              📷 파일 선택
               <input type="file" id="input-card-image" accept="image/*" style="display: none;" />
             </label>
           </div>
         </div>
 
-        <button id="btn-add-card" class="btn-primary" style="width: 100%; padding: 13px;">➕ 단어장에 카드 등록</button>
+        <button id="btn-add-card" class="btn-primary" style="width: 100%; padding: 13px;">➕ 새 단어로 카드 등록</button>
       </div>
 
+      <!-- 🗂️ 등록된 카드 목록 & 드래그 다중 선택 바 -->
       <div class="card-box" style="flex: 1;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <h4 style="margin: 0; font-size: 15px;">🗂️ 등록된 카드 (${deck.cards.length}개)</h4>
-          ${deck.cards.length > 0 ? `<button id="btn-clear-deck-cards" class="btn-danger" style="font-size: 11px; padding: 5px 10px;">전체 삭제</button>` : ''}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h4 style="margin: 0; font-size: 15px;">🗂️ 등록된 카드 (${deck.cards.length}개)</h4>
+            <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
+              💡 카드를 클릭하거나 <b>길게 눌러 위아래로 드래그</b>하면 여러 단어를 한 번에 선택할 수 있습니다.
+            </div>
+          </div>
+          ${deck.cards.length > 0 ? `
+            <div style="display: flex; gap: 6px;">
+              <button id="btn-select-all-cards" class="btn-secondary" style="font-size: 11.5px; padding: 6px 10px;">
+                ${selectedCardIds.size === deck.cards.length ? '전체 해제' : '전체 선택'}
+              </button>
+            </div>
+          ` : ''}
         </div>
-        ${cardRowsHtml || '<p style="color: var(--text-secondary); font-size: 14px;">등록된 카드가 없습니다.</p>'}
+
+        ${selectedCardIds.size > 0 ? `
+          <div class="bulk-action-bar">
+            <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-blue);">
+              ☑️ ${selectedCardIds.size}개 단어 선택됨
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <label class="btn-primary" style="padding: 7px 12px; font-size: 12px; cursor: pointer; border-radius: 8px;">
+                🖼️ 선택 단어에 사진 파일 넣기
+                <input type="file" id="input-bulk-image" accept="image/*" style="display: none;" />
+              </label>
+              <button id="btn-bulk-delete" class="btn-danger" style="padding: 7px 12px; font-size: 12px;">
+                🗑️ 선택 삭제 (${selectedCardIds.size}개)
+              </button>
+            </div>
+          </div>
+        ` : ''}
+
+        <div id="manage-card-list-container">
+          ${cardRowsHtml || '<p style="color: var(--text-secondary); font-size: 14px;">등록된 카드가 없습니다.</p>'}
+        </div>
       </div>
     </div>
     ${renderSettingsModalHtml()}
   `;
+
+  // 타이핑 중인 글자 실시간 보존 (사진 붙여넣기 시 날아가지 않도록)
+  const frontEl = document.getElementById('input-card-front') as HTMLInputElement | null;
+  const backEl = document.getElementById('input-card-back') as HTMLInputElement | null;
+  const exEl = document.getElementById('input-card-example') as HTMLInputElement | null;
+  frontEl?.addEventListener('input', () => { draftFrontText = frontEl.value; });
+  backEl?.addEventListener('input', () => { draftBackText = backEl.value; });
+  exEl?.addEventListener('input', () => { draftExampleText = exEl.value; });
 
   document.getElementById('btn-open-settings')?.addEventListener('click', () => {
     isSettingsModalOpen = true;
@@ -1254,8 +1313,9 @@ async function renderDeckManage(deckId: string): Promise<void> {
 
   const goBackToDashboard = () => {
     clearSwipeListener();
-    window.onpaste = null;
+    document.onpaste = null;
     pendingCardImageData = undefined;
+    selectedCardIds.clear();
     selectedDeckId = null;
     render();
   };
@@ -1263,28 +1323,18 @@ async function renderDeckManage(deckId: string): Promise<void> {
   document.getElementById('btn-back')?.addEventListener('click', goBackToDashboard);
   attachSwipeBackListener(goBackToDashboard);
 
-  // 📷 사진 파일 선택 시 즉시 초경량 압축
-  const imgInput = document.getElementById('input-card-image') as HTMLInputElement | null;
-  imgInput?.addEventListener('change', async (e) => {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (!file) return;
-    try {
-      pendingCardImageData = await compressImageToDataUrl(file);
-      await render();
-    } catch (err) {
-      alert(`이미지 압축 실패: ${(err as Error).message}`);
-    }
-  });
-
-  // 📋 클립보드(Ctrl+V)로 복사한 이미지 바로 붙여넣기 지원
-  window.onpaste = async (e: ClipboardEvent) => {
+  // 📋 화면 어디서든 Ctrl + V 누르면 클립보드 이미지 즉시 감지 및 압축!
+  document.onpaste = async (e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        const blob = items[i].getAsFile();
+      const item = items[i];
+      if (item.type.indexOf('image') !== -1) {
+        e.preventDefault();
+        const blob = item.getAsFile();
         if (blob) {
           pendingCardImageData = await compressImageToDataUrl(blob);
+          triggerHaptic(15);
           await render();
           break;
         }
@@ -1292,21 +1342,171 @@ async function renderDeckManage(deckId: string): Promise<void> {
     }
   };
 
+  // 📷 상단 사진 파일 선택
+  const imgInput = document.getElementById('input-card-image') as HTMLInputElement | null;
+  imgInput?.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    pendingCardImageData = await compressImageToDataUrl(file);
+    await render();
+  });
+
   document.getElementById('btn-clear-img')?.addEventListener('click', () => {
     pendingCardImageData = undefined;
     render();
   });
 
-  document.getElementById('btn-clear-deck-cards')?.addEventListener('click', async () => {
-    if (confirm('이 단어장의 모든 카드를 삭제하시겠습니까?')) {
-      for (const c of [...deck.cards]) {
-        await api.deleteCard(deck.id, c.id);
+  // 🎯 상단에 붙여넣은 사진을 아래 체크된 단어들에 일괄 적용!
+  document.getElementById('btn-apply-img-selected')?.addEventListener('click', async () => {
+    if (!pendingCardImageData || selectedCardIds.size === 0) return;
+    for (const cardId of selectedCardIds) {
+      await api.updateCard(deck.id, cardId, { imageData: pendingCardImageData });
+    }
+    alert(`🎉 선택된 ${selectedCardIds.size}개 단어에 사진이 성공적으로 적용되었습니다!`);
+    pendingCardImageData = undefined;
+    selectedCardIds.clear();
+    await render();
+  });
+
+  // 🖼️ 선택된 단어들에 파일에서 바로 사진 골라 적용
+  const bulkImgInput = document.getElementById('input-bulk-image') as HTMLInputElement | null;
+  bulkImgInput?.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file || selectedCardIds.size === 0) return;
+    const compressed = await compressImageToDataUrl(file);
+    for (const cardId of selectedCardIds) {
+      await api.updateCard(deck.id, cardId, { imageData: compressed });
+    }
+    alert(`🎉 선택된 ${selectedCardIds.size}개 단어에 사진이 적용되었습니다!`);
+    selectedCardIds.clear();
+    await render();
+  });
+
+  // 개별 단어 옆 📷 버튼으로 사진 즉시 넣기/변경
+  document.querySelectorAll<HTMLInputElement>('.input-single-card-img').forEach(input => {
+    input.addEventListener('change', async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      const cardId = input.dataset.cardId!;
+      if (!file || !cardId) return;
+      const compressed = await compressImageToDataUrl(file);
+      await api.updateCard(deck.id, cardId, { imageData: compressed });
+      await render();
+    });
+  });
+
+  // ☑️ 전체 선택 / 전체 해제
+  document.getElementById('btn-select-all-cards')?.addEventListener('click', () => {
+    if (selectedCardIds.size === deck.cards.length) {
+      selectedCardIds.clear();
+    } else {
+      deck.cards.forEach(c => selectedCardIds.add(c.id));
+    }
+    render();
+  });
+
+  // 🗑️ 선택된 단어 일괄 삭제
+  document.getElementById('btn-bulk-delete')?.addEventListener('click', async () => {
+    if (selectedCardIds.size === 0) return;
+    if (confirm(`선택한 ${selectedCardIds.size}개의 단어를 한 번에 삭제하시겠습니까?`)) {
+      for (const cardId of [...selectedCardIds]) {
+        await api.deleteCard(deck.id, cardId);
       }
+      selectedCardIds.clear();
       await render();
     }
   });
 
-  // 새 단어 카드 추가 (예문 & 압축된 그림 포함)
+  // =========================================================
+  // 🖱️👆 클릭 & 길게 눌러 드래그(Range Drag Selection) 다중 선택 구현
+  // =========================================================
+  const rowElements = Array.from(document.querySelectorAll<HTMLElement>('.selectable-card-item'));
+  let isRangeDragging = false;
+  let dragStartIndex = -1;
+  let dragTargetSelectState = true;
+  let longPressTimer: number | null = null;
+
+  const updateRangeSelection = (currentIndex: number) => {
+    if (dragStartIndex === -1) return;
+    const start = Math.min(dragStartIndex, currentIndex);
+    const end = Math.max(dragStartIndex, currentIndex);
+    for (let i = start; i <= end; i++) {
+      const row = rowElements[i];
+      const id = row?.dataset.cardId;
+      if (!id) continue;
+      if (dragTargetSelectState) selectedCardIds.add(id);
+      else selectedCardIds.delete(id);
+      row.classList.toggle('selected-row', dragTargetSelectState);
+      const chk = row.querySelector<HTMLInputElement>('.card-checkbox');
+      if (chk) chk.checked = dragTargetSelectState;
+    }
+  };
+
+  rowElements.forEach((row, idx) => {
+    const cardId = row.dataset.cardId!;
+
+    // 1) 일반 클릭 시 선택 토글
+    row.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).tagName === 'LABEL') return;
+      if (isRangeDragging) return;
+      if (selectedCardIds.has(cardId)) selectedCardIds.delete(cardId);
+      else selectedCardIds.add(cardId);
+      render();
+    });
+
+    // 2) PC 마우스 드래그 범위 선택
+    row.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || (e.target as HTMLElement).tagName === 'BUTTON') return;
+      dragStartIndex = idx;
+      dragTargetSelectState = !selectedCardIds.has(cardId);
+    });
+
+    row.addEventListener('mouseenter', () => {
+      if (dragStartIndex !== -1 && dragStartIndex !== idx) {
+        isRangeDragging = true;
+        updateRangeSelection(idx);
+      }
+    });
+
+    // 3) 모바일 터치 길게 눌러(0.22초) 위아래로 긁어서 범위 선택
+    row.addEventListener('touchstart', () => {
+      longPressTimer = window.setTimeout(() => {
+        isRangeDragging = true;
+        dragStartIndex = idx;
+        dragTargetSelectState = !selectedCardIds.has(cardId);
+        triggerHaptic(25);
+        updateRangeSelection(idx);
+      }, 220);
+    }, { passive: true });
+
+    row.addEventListener('touchmove', (e: TouchEvent) => {
+      if (!isRangeDragging) {
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        return;
+      }
+      e.preventDefault(); // 범위 드래그 중에는 화면 스크롤 방지
+      const touch = e.touches[0];
+      const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+      const targetRow = targetEl?.closest<HTMLElement>('.selectable-card-item');
+      if (targetRow && targetRow.dataset.idx !== undefined) {
+        updateRangeSelection(Number(targetRow.dataset.idx));
+      }
+    }, { passive: false });
+  });
+
+  const finishDragSelection = () => {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    if (isRangeDragging) {
+      isRangeDragging = false;
+      dragStartIndex = -1;
+      render();
+    } else {
+      dragStartIndex = -1;
+    }
+  };
+  window.addEventListener('mouseup', finishDragSelection, { once: true });
+  window.addEventListener('touchend', finishDragSelection, { once: true });
+
+  // 새 단어 카드 추가
   document.getElementById('btn-add-card')?.addEventListener('click', async () => {
     const front = (document.getElementById('input-card-front') as HTMLInputElement).value.trim();
     const back = (document.getElementById('input-card-back') as HTMLInputElement).value.trim();
@@ -1314,11 +1514,14 @@ async function renderDeckManage(deckId: string): Promise<void> {
     if (!front || !back) return alert('앞면(단어)과 뒷면(뜻)을 입력해주세요!');
 
     await api.addCard(deck.id, front, back, settings.startingEase, example || undefined, pendingCardImageData);
+    draftFrontText = '';
+    draftBackText = '';
+    draftExampleText = '';
     pendingCardImageData = undefined;
     await render();
   });
 
-  // CSV 대량 등록 (3번째 열 예문까지 자동 저장)
+  // CSV 대량 등록
   const csvInput = document.getElementById('input-csv-file') as HTMLInputElement;
   csvInput?.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -1344,6 +1547,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
   document.querySelectorAll('.btn-delete-card').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const cardId = (e.currentTarget as HTMLButtonElement).dataset.cardId!;
+      selectedCardIds.delete(cardId);
       await api.deleteCard(deck.id, cardId);
       await render();
     });
@@ -1425,18 +1629,24 @@ async function renderStudyRoom(): Promise<void> {
           ${lastReactionText}
         </div>
 
+        <!-- 1. 정답 확인 시 가장 상단에 카드 가로폭 60% 크기의 시원한 사진 배치 -->
+        ${isAnswerRevealed && currentCard.imageData ? `
+          <div class="study-top-image-wrap">
+            <img src="${currentCard.imageData}" class="study-top-image" alt="visual memory aid" onerror="this.parentElement.style.display='none'" />
+          </div>
+        ` : ''}
+
+        <!-- 2. 중간: 영어 단어 -->
         <div class="study-question">${escapeHtml(currentCard.front)}</div>
 
+        <!-- 3. 그 밑에 뜻 & 4. 맨 밑에 예문 (있는 경우) -->
         ${isAnswerRevealed ? `
           <div class="study-divider"></div>
           <div class="study-back-container">
             <div class="study-answer">${escapeHtml(currentCard.back)}</div>
 
-            ${currentCard.imageData ? `
-              <img src="${currentCard.imageData}" class="study-image-frame" alt="visual memory aid" onerror="this.style.display='none'" />
-            ` : ''}
-
             ${currentCard.example ? `
+              <div class="study-divider" style="width: 55%; margin: 10px auto;"></div>
               <div class="study-example-box">
                 <div class="study-example-text">💬 "${escapeHtml(currentCard.example)}"</div>
                 <button type="button" id="btn-speak-example" class="icon-circle-btn" style="width: 32px; height: 32px; font-size: 14px; flex-shrink: 0;" title="예문 발음 듣기">🔉</button>
@@ -1444,7 +1654,7 @@ async function renderStudyRoom(): Promise<void> {
             ` : ''}
           </div>
         ` : `
-          <div class="tap-guide-hint">💡 카드를 터치하면 뜻이 보입니다</div>
+          <div class="tap-guide-hint">💡 카드를 터치하면 뜻과 사진이 보입니다</div>
         `}
 
         <button id="btn-speak-card" class="card-speaker-btn" title="발음 듣기">🔊</button>
