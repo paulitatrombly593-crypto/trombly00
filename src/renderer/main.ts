@@ -1680,61 +1680,64 @@ async function renderStudyRoom(): Promise<void> {
           </div>
         ` : ''}
 
-        <div class="study-question">${escapeHtml(currentCard.front)}</div>
+        <div class="study-question">${formatRichText(currentCard.front)}</div>
 
         ${isAnswerRevealed ? `
           <div class="study-divider"></div>
           <div class="study-back-container">
-            <div class="study-answer">${escapeHtml(currentCard.back)}</div>
+            <div class="study-answer">${formatRichText(currentCard.back)}</div>
 
             ${currentCard.example ? `
               <div class="study-divider" style="width: 55%; margin: 10px auto;"></div>
               <div class="study-example-box">
-                <div class="study-example-text">💬 "${escapeHtml(currentCard.example)}"</div>
+                <div class="study-example-text">💬 "${formatRichText(currentCard.example)}"</div>
                 <button type="button" id="btn-speak-example" class="icon-circle-btn" style="width: 32px; height: 32px; font-size: 14px; flex-shrink: 0;" title="예문 발음 듣기">🔉</button>
               </div>
             ` : ''}
           </div>
         ` : `
-          <div class="tap-guide-hint">💡 카드를 터치하면 뜻과 사진이 보입니다</div>
+          <div class="tap-guide-hint">💡 카드를 클릭하거나 Space를 누르면 답이 보입니다</div>
         `}
 
         <button id="btn-speak-card" class="card-speaker-btn" title="발음 듣기">🔊</button>
       </div>
 
       ${!isAnswerRevealed ? `
-        <button id="btn-reveal" class="btn-primary" style="width: 100%; padding: 18px; font-size: 17px; border-radius: 16px;">
-          정답 확인하기 ${settings.viewMode === 'pc' ? '(Space)' : ''}
-        </button>
-      ` : isStarCramMode ? `
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
-          <button id="btn-cram-retry" class="btn-rate btn-again" style="padding: 18px 10px;">
-            <b>🔄 다시 보기 (헷갈림)</b>
-            <span class="btn-due-sub">이번 세션 끝에 재출제 [1]</span>
-          </button>
-          <button id="btn-cram-pass" class="btn-rate btn-good" style="padding: 18px 10px;">
-            <b>✅ 외웠음 (통과)</b>
-            <span class="btn-due-sub">스케줄 변경 없이 통과 [3]</span>
+        <div class="calm-bottom-bar">
+          <button id="btn-reveal" class="glass-pill-btn glass-reveal-btn">
+            정답 확인 ${settings.viewMode === 'pc' ? '(Space)' : ''}
           </button>
         </div>
+      ` : isStarCramMode ? `
+        <div class="calm-bottom-bar">
+          <div class="glass-btn-wrap">
+            <span class="due-above-label">세션 끝 재출제</span>
+            <button id="btn-cram-retry" class="glass-pill-btn">🔄 다시 보기</button>
+          </div>
+          <div class="glass-btn-wrap">
+            <span class="due-above-label">통과</span>
+            <button id="btn-cram-pass" class="glass-pill-btn glass-good-accent">✅ 외웠음</button>
+          </div>
+        </div>
       ` : `
-        <div class="rating-grid">
-          <button class="btn-rate btn-again" data-rating="1">
-            <b>1. 다시</b>
-            <span class="btn-due-sub">${previewLabels[1]} 후</span>
-          </button>
-          <button class="btn-rate btn-hard" data-rating="2">
-            <b>2. 어려움</b>
-            <span class="btn-due-sub">${previewLabels[2]} 후</span>
-          </button>
-          <button class="btn-rate btn-easy" data-rating="4">
-            <b>4. 쉬움</b>
-            <span class="btn-due-sub">${previewLabels[4]} 후</span>
-          </button>
-          <button class="btn-rate btn-good" data-rating="3">
-            <b>3. 알맞음</b>
-            <span class="btn-due-sub">${previewLabels[3]} 후</span>
-          </button>
+        <!-- 🫧 2번 사진 스타일: 상단에 작은 복습 주기 + 하단에 아이폰 글래스 구슬형 컴팩트 버튼 -->
+        <div class="calm-bottom-bar">
+          <div class="glass-btn-wrap">
+            <span class="due-above-label">${previewLabels[1]}</span>
+            <button class="btn-rate glass-pill-btn" data-rating="1">다시</button>
+          </div>
+          <div class="glass-btn-wrap">
+            <span class="due-above-label">${previewLabels[2]}</span>
+            <button class="btn-rate glass-pill-btn" data-rating="2">어려움</button>
+          </div>
+          <div class="glass-btn-wrap">
+            <span class="due-above-label">${previewLabels[4]}</span>
+            <button class="btn-rate glass-pill-btn" data-rating="4">쉬움</button>
+          </div>
+          <div class="glass-btn-wrap">
+            <span class="due-above-label">${previewLabels[3]}</span>
+            <button class="btn-rate glass-pill-btn glass-good-accent" data-rating="3">알맞음</button>
+          </div>
         </div>
       `}
     </div>
@@ -1899,6 +1902,9 @@ async function renderStudyRoom(): Promise<void> {
     } else if (isAnswerRevealed && isStarCramMode) {
       if (e.key === '1') document.getElementById('btn-cram-retry')?.click();
       if (e.key === '3' || e.key === '2' || e.key === '4') document.getElementById('btn-cram-pass')?.click();
+    } else if (isAnswerRevealed && (e.code === 'Space' || e.key === ' ' || e.key === 'Enter')) {
+      e.preventDefault();
+      await handleRatingWithReaction(3); // 2번 사진처럼 Space 한 번 더 누르면 자동으로 Good(3번)!
     } else if (isAnswerRevealed && ['1', '2', '3', '4'].includes(e.key)) {
       e.preventDefault();
       await handleRatingWithReaction(Number(e.key) as ReviewRating);
@@ -1951,6 +1957,14 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/**
+ * **텍스트** 입력을 감지하여 2번 사진처럼 선명한 파란색 볼드체로 강조해주는 함수
+ */
+function formatRichText(text: string): string {
+  const escaped = escapeHtml(text);
+  return escaped.replace(/\*\*(.+?)\*\*/g, '<strong class="text-highlight">$1</strong>');
 }
 
 async function render(): Promise<void> {
