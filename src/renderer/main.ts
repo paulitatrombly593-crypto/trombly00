@@ -803,12 +803,12 @@ function renderSettingsModalHtml(): string {
     // GitHub Dark+ 대표 신택스 컬러 5종 프리셋 칩 생성 헬퍼
     const renderColorChips = (targetInputId: string) => {
       const ghColors = [
-        { hex: '#e6edf3', name: 'GitHub White' },
-        { hex: '#79c0ff', name: 'GitHub Sky Blue' },
-        { hex: '#7ee787', name: 'GitHub Mint Green' },
-        { hex: '#ffa657', name: 'GitHub Orange' },
-        { hex: '#d2a8ff', name: 'GitHub Purple' },
-        { hex: '#ff7b72', name: 'GitHub Coral Red' }
+        { hex: '#d4d4d4', name: 'VS Code Base Gray' },
+        { hex: '#9cdcfe', name: 'VS Code Light Blue' },
+        { hex: '#4ec9b0', name: 'VS Code Mint Green' },
+        { hex: '#ce9178', name: 'VS Code Warm Orange' },
+        { hex: '#c586c0', name: 'VS Code Purple' },
+        { hex: '#dcdcaa', name: 'VS Code Yellow' }
       ];
       return ghColors
         .map(c => `<button type="button" class="gh-color-chip" data-target="${targetInputId}" data-hex="${c.hex}" style="background:${c.hex};" title="${c.name}"></button>`)
