@@ -12,13 +12,14 @@ if (!appElement) {
 }
 
 // =========================================================
-// ⚙️ Anki 전문 설정 로드 및 국밥 기본값 관리
+// ⚙️ Anki 전문 설정 로드 및 소프트 코딩 상태 관리
 // =========================================================
 const ANKI_SETTINGS_KEY = 'MY_ANKI_PRO_SETTINGS_V2';
 const STARRED_CARDS_KEY = 'MY_ANKI_STARRED_CARDS';
 
 type SettingsTab = 'new' | 'review' | 'lapse' | 'general' | 'display';
 type SubPageMode = 'none' | 'today-quota' | 'starred-list';
+type StudyDirection = 'front-to-back' | 'back-to-front' | 'random';
 
 function loadSettings(): AnkiSettings {
   try {
@@ -35,10 +36,20 @@ let activeSettingsTab: SettingsTab = 'new';
 let isSettingsModalOpen = false;
 let isAllCardsModalOpen = false;
 let isQuitConfirmModalOpen = false;
-let isEditCardModalOpen = false; // ✏️ 학습 중 즉시 수정(Edit) 모달 상태
+let isEditCardModalOpen = false;
 let saveProgressOnQuit = true;
 let studySessionSnapshot: StorageSchema | null = null;
 let currentSubPage: SubPageMode = 'none';
+
+// ✨ 신규 8대 기능용 소프트 상태 변수
+let isAddCardAccordionOpen = false; // UI/UX 1: 단어 관리장 추가 폼 아코디언 접기/펼치기
+let zoomedImageUrl: string | null = null; // UI/UX 2: 학습 사진 클릭 시 전체화면 Lightbox 줌
+let studyDirection: StudyDirection = 'front-to-back'; // 제안 1: 양방향 학습 (단어->뜻 / 뜻->단어 / 랜덤)
+let currentCardReversed = false; // 현재 카드가 역방향(뜻->단어) 상태인지 여부
+let isTypingMode = false; // 제안 2: 스펠링 직접 타이핑 모드
+let lastTypedAttempt = ''; // 사용자가 타이핑한 스펠링 답안
+let isAutoPlayMode = false; // 제안 4: 핸즈프리 깜빡이 자동 재생 모드
+let autoPlayTimerId: number | null = null;
 
 // ↩️ 방금 넘긴 카드 되돌리기(Undo) 히스토리 스택
 interface UndoSnapshot {
@@ -50,8 +61,8 @@ let undoHistoryStack: UndoSnapshot[] = [];
 
 // 📊 현재 학습 세션의 카드별 정답('correct') / 오답('wrong') 기록 맵
 let sessionResultsMap: Map<string, 'correct' | 'wrong'> = new Map();
-let resultFilterTab: 'all' | 'wrong' | 'correct' = 'all'; // 결과 화면 탭 필터
-let editingCardTarget: Card | null = null; // 학습 중 또는 결과 화면에서 수정 중인 카드
+let resultFilterTab: 'all' | 'wrong' | 'correct' = 'all';
+let editingCardTarget: Card | null = null;
 
 // 🔍 단어 관리장 실시간 검색어 상태
 let manageSearchQuery = '';
@@ -78,18 +89,130 @@ function applyDisplayClasses(): void {
   document.body.classList.remove('mode-pc', 'mode-mobile', 'theme-dark', 'theme-light');
   document.body.classList.add(`mode-${settings.viewMode}`, `theme-${settings.themeMode}`);
 
-  // 4대 섹터별 글자색 CSS 변수 실시간 반영
   const root = document.documentElement;
-  root.style.setProperty('--sector-base-color', settings.colorBaseText || '#e6edf3');
+  root.style.setProperty('--sector-base-color', settings.colorBaseText || '#d4d4d4');
   root.style.setProperty('--sector-word-color', settings.colorWordText || '#ffffff');
-  root.style.setProperty('--sector-meaning-color', settings.colorMeaningText || '#79c0ff');
-  root.style.setProperty('--sector-highlight-color', settings.colorHighlightText || '#ffa657');
+  root.style.setProperty('--sector-meaning-color', settings.colorMeaningText || '#9cdcfe');
+  root.style.setProperty('--sector-highlight-color', settings.colorHighlightText || '#ce9178');
 }
 
 applyDisplayClasses();
 
 // =========================================================
-// 📊 단어 진척도(Mastery) 및 EZ Zone 점수 산출 헬퍼
+// 🌱 [신규] Anki 84일 잔디밭(Heatmap) & 📅 향후 7일 복습 예보 계산기
+// =========================================================
+function buildHeatmapAndForecastHtml(data: StorageSchema): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // 1) 날짜별 복습 로그 카운트 집계 (YYYY-MM-DD -> count)
+  const logCountByDate = new Map<string, number>();
+  data.logs.forEach(log => {
+    const dateKey = log.reviewDate.slice(0, 10);
+    logCountByDate.set(dateKey, (logCountByDate.get(dateKey) || 0) + 1);
+  });
+
+  // 연속 학습 스트릭(Streak) 일수 계산
+  let streakDays = 0;
+  for (let d = 0; d < 365; d++) {
+    const checkDate = new Date(today.getTime() - d * 86400000);
+    const key = checkDate.toISOString().slice(0, 10);
+    const count = logCountByDate.get(key) || 0;
+    if (count > 0) {
+      streakDays++;
+    } else if (d > 0) {
+      break;
+    }
+  }
+
+  // 최근 84일(12주) 잔디 셀 생성
+  const heatmapCells: string[] = [];
+  for (let i = 83; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000);
+    const key = d.toISOString().slice(0, 10);
+    const count = logCountByDate.get(key) || 0;
+    let levelClass = '';
+    if (count >= 30) levelClass = 'heat-lv4';
+    else if (count >= 15) levelClass = 'heat-lv3';
+    else if (count >= 5) levelClass = 'heat-lv2';
+    else if (count >= 1) levelClass = 'heat-lv1';
+
+    heatmapCells.push(`<div class="heatmap-cell ${levelClass}" title="${key}: ${count}회 학습"></div>`);
+  }
+
+  // 2) 향후 7일(오늘 ~ +6일) 복습 예정 카드 수 집계
+  const forecastCounts: { label: string; count: number; dateStr: string }[] = [];
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+
+  for (let offset = 0; offset < 7; offset++) {
+    const targetDay = new Date(today.getTime() + offset * 86400000);
+    const nextDay = new Date(today.getTime() + (offset + 1) * 86400000);
+    let dueCount = 0;
+
+    data.decks.forEach(deck => {
+      deck.cards.forEach(card => {
+        if (card.suspended) return;
+        const dueTime = new Date(card.dueDate).getTime();
+        if (offset === 0) {
+          if (dueTime <= nextDay.getTime()) dueCount++;
+        } else {
+          if (dueTime > targetDay.getTime() && dueTime <= nextDay.getTime()) dueCount++;
+        }
+      });
+    });
+
+    const label = offset === 0 ? '오늘' : offset === 1 ? '내일' : `${dayNames[targetDay.getDay()]}`;
+    forecastCounts.push({ label, count: dueCount, dateStr: `${targetDay.getMonth() + 1}/${targetDay.getDate()}` });
+  }
+
+  const maxForecast = Math.max(10, ...forecastCounts.map(f => f.count));
+  const forecastBarsHtml = forecastCounts
+    .map(f => {
+      const heightPct = Math.min(100, Math.round((f.count / maxForecast) * 100));
+      return `
+        <div class="forecast-col" title="${f.dateStr}: ${f.count}장 예정">
+          <span class="forecast-count">${f.count}</span>
+          <div class="forecast-bar-track">
+            <div class="forecast-bar-fill" style="height: ${heightPct}%; ${f.count > 0 ? '' : 'opacity:0.2;'}"></div>
+          </div>
+          <span class="forecast-day-label">${f.label}</span>
+        </div>
+      `;
+    })
+    .join('');
+
+  return `
+    <div class="analytics-grid">
+      <div class="card-box" style="margin-bottom: 0;">
+        <div class="heatmap-header">
+          <div>
+            <strong style="font-size: 14px;">🌱 학습 잔디밭 (최근 12주)</strong>
+            <div style="font-size: 11px; color: var(--text-secondary);">매일 단어를 학습하고 초록 잔디를 채워보세요</div>
+          </div>
+          <span class="streak-pill">🔥 ${streakDays}일 연속 학습</span>
+        </div>
+        <div class="heatmap-grid">
+          ${heatmapCells.join('')}
+        </div>
+      </div>
+
+      <div class="card-box" style="margin-bottom: 0;">
+        <div class="heatmap-header">
+          <div>
+            <strong style="font-size: 14px;">📅 향후 7일 복습 예보 달력</strong>
+            <div style="font-size: 11px; color: var(--text-secondary);">날짜별 돌아올 복습 카드 예측량</div>
+          </div>
+        </div>
+        <div class="forecast-bars">
+          ${forecastBarsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// =========================================================
+// 📊 단어 진척도(Mastery) 산출 헬퍼
 // =========================================================
 function getCardMasteryInfo(card: Card): {
   levelText: string;
@@ -111,13 +234,12 @@ function getCardMasteryInfo(card: Card): {
 }
 
 // =========================================================
-// 🔊 TTS 오디오, 햅틱, 스와이프, 답변 타이머 관리
+// 🔊 TTS 오디오, 햅틱, 스와이프, 답변 타이머, 오토플레이 관리
 // =========================================================
 function speakText(text: string): void {
   if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
 
-  // 발음 시 **강조** 기호나 {{빈칸}} 기호는 제거하고 깔끔하게 읽기
   const cleanText = text.replace(/\*\*/g, '').replace(/\{\{|\}\}/g, '');
   const utterance = new SpeechSynthesisUtterance(cleanText);
   const hasKorean = /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(cleanText);
@@ -130,6 +252,53 @@ function speakText(text: string): void {
   utterance.onerror = () => speakerBtn?.classList.remove('speaking');
 
   window.speechSynthesis.speak(utterance);
+}
+
+function stopAutoPlay(): void {
+  isAutoPlayMode = false;
+  if (autoPlayTimerId) {
+    clearTimeout(autoPlayTimerId);
+    autoPlayTimerId = null;
+  }
+}
+
+function scheduleNextAutoPlayStep(): void {
+  if (!isAutoPlayMode || !studyingDeckId || currentCardIndex >= studyQueue.length) {
+    stopAutoPlay();
+    return;
+  }
+  if (autoPlayTimerId) clearTimeout(autoPlayTimerId);
+
+  const currentCard = studyQueue[currentCardIndex];
+  if (!isAnswerRevealed) {
+    // 앞면일 때: 발음 읽고 2.4초 뒤 자동으로 뜻 공개
+    speakText(currentCardReversed ? currentCard.back : currentCard.front);
+    autoPlayTimerId = window.setTimeout(() => {
+      if (!isAutoPlayMode) return;
+      isAnswerRevealed = true;
+      render();
+    }, 2400);
+  } else {
+    // 뒷면일 때: 2.6초 보여준 뒤 다음 카드로 이동 (SM-2는 Good(3) 또는 패스 처리)
+    autoPlayTimerId = window.setTimeout(async () => {
+      if (!isAutoPlayMode) return;
+      if (isStarCramMode) {
+        currentCardIndex++;
+        isAnswerRevealed = false;
+        determineCardDirection();
+        await render();
+      } else {
+        await handleRatingWithReaction(3);
+      }
+    }, 2600);
+  }
+}
+
+function determineCardDirection(): void {
+  if (studyDirection === 'front-to-back') currentCardReversed = false;
+  else if (studyDirection === 'back-to-front') currentCardReversed = true;
+  else currentCardReversed = Math.random() < 0.5;
+  lastTypedAttempt = '';
 }
 
 function triggerHaptic(ms = 10): void {
@@ -156,7 +325,7 @@ function attachSwipeBackListener(onSwipeBack: () => void): void {
   };
 
   window.ontouchend = (e: TouchEvent) => {
-    if (isSettingsModalOpen || isAllCardsModalOpen || isEditCardModalOpen) return;
+    if (isSettingsModalOpen || isAllCardsModalOpen || isEditCardModalOpen || zoomedImageUrl) return;
     const deltaX = e.changedTouches[0].clientX - touchStartX;
     const deltaY = e.changedTouches[0].clientY - touchStartY;
 
@@ -174,15 +343,14 @@ function clearSwipeListener(): void {
   window.ontouchend = null;
 }
 
-// 화면 상태 변수
 let selectedDeckId: string | null = null;
 let studyingDeckId: string | null = null;
 let isStarCramMode = false;
 let studyQueue: Card[] = [];
 let currentCardIndex = 0;
 let isAnswerRevealed = false;
-let isProcessingRating = false; // 카드 전환 애니메이션 중 중복 입력 잠금
-let lastKeyActionTime = 0; // 기계식 키보드 채터링(0.12초 이내 중복) 방지용 시각
+let isProcessingRating = false;
+let lastKeyActionTime = 0;
 let lastReactionText: string = '';
 let reactionFadeTimer: number | null = null;
 
@@ -242,7 +410,6 @@ async function readFileWithAutoEncoding(file: File): Promise<string> {
   return utf8Text;
 }
 
-// 🖼️ 새 단어 입력폼 상태 보존 및 다중 선택 상태 관리
 let pendingCardImageData: string | undefined = undefined;
 let draftFrontText = '';
 let draftBackText = '';
@@ -325,7 +492,7 @@ function buildDailyStudyQueue(deck: Deck, logs: StorageSchema['logs']): { queue:
 }
 
 // =========================================================
-// 📚 [기능 1] '전체 카드' 창 안에 창(모달) 렌더링 (**강조** 완벽 적용)
+// 📚 '전체 카드' 모달
 // =========================================================
 function renderAllCardsModalHtml(decks: Deck[]): string {
   if (!isAllCardsModalOpen) return '';
@@ -353,7 +520,7 @@ function renderAllCardsModalHtml(decks: Deck[]): string {
           </button>
         </div>
         <div style="font-size: 15px; word-break: break-all;">
-          <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
+          <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:var(--sector-meaning-color); margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-secondary);">
           <span>진척도: <b>${m.progressPct}%</b> (현재 간격: ${card.interval}일)</span>
@@ -373,7 +540,7 @@ function renderAllCardsModalHtml(decks: Deck[]): string {
           <div>
             <h3 style="margin: 0; font-size: 17px;">📚 전체 보유 카드 진척도 브라우저 (총 ${allCards.length}장)</h3>
             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-              모든 단어장의 카드 수준(Lv.0~Lv.3)과 EZ Zone 난이도를 스크롤로 확인하세요.
+              모든 단어장의 카드 암기 수준(Lv.0~Lv.3)과 진척도를 스크롤로 확인하세요.
             </div>
           </div>
           <button id="btn-close-all-cards" class="icon-circle-btn" style="width:32px; height:32px; font-size:14px;">✕</button>
@@ -406,7 +573,7 @@ function attachAllCardsModalEvents(): void {
 }
 
 // =========================================================
-// 🔥 [기능 2] '오늘 할당량' 전용 페이지 (**강조** 완벽 적용)
+// 🔥 '오늘 할당량' 전용 페이지
 // =========================================================
 async function renderTodayQuotaPage(): Promise<void> {
   const data = await api.getStorageData();
@@ -438,7 +605,7 @@ async function renderTodayQuotaPage(): Promise<void> {
           <span style="font-size: 11px; color: var(--text-secondary);">🕒 완료 시각: ${timeStr}</span>
         </div>
         <div style="font-size: 15px;">
-          <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
+          <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:var(--sector-meaning-color); margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
         </div>
         <div class="deck-stats">
           📁 [${escapeHtml(deck.name)}] · 선택한 평가: <b>${log.rating}번</b> · 진척도(다음 복습): <b>${nextDue}</b>
@@ -465,9 +632,9 @@ async function renderTodayQuotaPage(): Promise<void> {
             <span class="ez-badge ${m.levelClass}">${m.levelText}</span>
           </div>
           <div style="font-size: 15px; word-break: break-all;">
-            <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:#60a5fa; margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
+            <strong>Q:</strong> ${formatRichText(card.front, true)} <span style="color:var(--sector-meaning-color); margin-left:6px;"><strong>A:</strong> ${formatRichText(card.back, true)}</span>
           </div>
-          <div class="deck-stats">📁 ${escapeHtml(deckName)} · 현재 간격: ${card.interval}일</div>
+          <div class="deck-stats">현재 간격: ${card.interval}일</div>
         </div>
       </div>
     `;
@@ -525,7 +692,7 @@ async function renderTodayQuotaPage(): Promise<void> {
 }
 
 // =========================================================
-// ⭐ [기능 3] '중요 표시(별표)' 전용 페이지 (**강조** 완벽 적용)
+// ⭐ '중요 표시(별표)' 전용 페이지
 // =========================================================
 async function renderStarredPage(): Promise<void> {
   const data = await api.getStorageData();
@@ -554,7 +721,7 @@ async function renderStarredPage(): Promise<void> {
           <div style="font-size: 15.5px; word-break: break-all;">
             ⭐ <strong>Q:</strong> ${formatRichText(card.front, true)}
           </div>
-          <div style="color: #60a5fa; margin-top: 3px; font-size: 14px; word-break: break-all;">
+          <div style="color: var(--sector-meaning-color); margin-top: 3px; font-size: 14px; word-break: break-all;">
             <strong>A:</strong> ${formatRichText(card.back, true)}
           </div>
           <div class="deck-stats">원래 스케줄: ${dueBadge}</div>
@@ -621,6 +788,7 @@ async function renderStarredPage(): Promise<void> {
     studyQueue = starredCards.map(item => ({ ...item.card }));
     currentCardIndex = 0;
     isAnswerRevealed = false;
+    determineCardDirection();
     triggerReactionBadge('Star Cram ⭐');
     await render();
     if (settings.autoPlayAudio && studyQueue[0]) {
@@ -800,7 +968,6 @@ function renderSettingsModalHtml(): string {
       </div>
     `;
   } else {
-    // GitHub Dark+ 대표 신택스 컬러 5종 프리셋 칩 생성 헬퍼
     const renderColorChips = (targetInputId: string) => {
       const ghColors = [
         { hex: '#d4d4d4', name: 'VS Code Base Gray' },
@@ -816,7 +983,7 @@ function renderSettingsModalHtml(): string {
     };
 
     rightPanelHtml = `
-      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🎨 GitHub Dark+ 테마 &amp; 섹터별 글자색 설정</h4>
+      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🎨 VS Code Dark+ 테마 &amp; 섹터별 글자색</h4>
       <div class="setting-row">
         <div>
           <div class="setting-label">화면 레이아웃 모드</div>
@@ -829,31 +996,30 @@ function renderSettingsModalHtml(): string {
       </div>
       <div class="setting-row">
         <div>
-          <div class="setting-label">배경 테마 (테마 변경 시 추천 글자색 자동 세팅)</div>
-          <div class="setting-desc">GitHub Dark+ (#0d1117) vs 라이트 모드</div>
+          <div class="setting-label">배경 테마</div>
+          <div class="setting-desc">VS Code Dark+ (#1e1e1e) vs 라이트 모드</div>
         </div>
         <select id="set-themeMode" class="setting-select">
-          <option value="dark" ${settings.themeMode === 'dark' ? 'selected' : ''}>🐙 GitHub Dark+ 모드</option>
+          <option value="dark" ${settings.themeMode === 'dark' ? 'selected' : ''}>💻 VS Code Dark+ 모드</option>
           <option value="light" ${settings.themeMode === 'light' ? 'selected' : ''}>☀️ 라이트 모드</option>
         </select>
       </div>
 
-      <!-- 4대 섹터별 글자색 커스텀 지정 -->
       <div class="setting-row">
         <div>
           <div class="setting-label">1. 기본 UI 글자색 (홈·설정·목록)</div>
-          <div class="setting-desc">전체 화면의 기본 안내 텍스트 색상</div>
+          <div class="setting-desc">전체 화면 기본 텍스트 색상</div>
         </div>
         <div class="color-picker-group">
           ${renderColorChips('set-colorBaseText')}
-          <input type="color" id="set-colorBaseText" class="custom-color-input" value="${settings.colorBaseText || '#e6edf3'}" />
+          <input type="color" id="set-colorBaseText" class="custom-color-input" value="${settings.colorBaseText || '#d4d4d4'}" />
         </div>
       </div>
 
       <div class="setting-row">
         <div>
           <div class="setting-label">2. 학습 시 '단어(앞면)' 글자색</div>
-          <div class="setting-desc">플래시카드 중앙 영단어/질문 색상</div>
+          <div class="setting-desc">플래시카드 중앙 질문 색상</div>
         </div>
         <div class="color-picker-group">
           ${renderColorChips('set-colorWordText')}
@@ -864,22 +1030,22 @@ function renderSettingsModalHtml(): string {
       <div class="setting-row">
         <div>
           <div class="setting-label">3. 학습 시 '뜻(뒷면)' 글자색</div>
-          <div class="setting-desc">정답 확인 시 나타나는 뜻 색상 (추천: 스카이블루/민트)</div>
+          <div class="setting-desc">정답 확인 시 나타나는 뜻 색상</div>
         </div>
         <div class="color-picker-group">
           ${renderColorChips('set-colorMeaningText')}
-          <input type="color" id="set-colorMeaningText" class="custom-color-input" value="${settings.colorMeaningText || '#79c0ff'}" />
+          <input type="color" id="set-colorMeaningText" class="custom-color-input" value="${settings.colorMeaningText || '#9cdcfe'}" />
         </div>
       </div>
 
       <div class="setting-row">
         <div>
-          <div class="setting-label">4. **강조** 포인트 글자색</div>
-          <div class="setting-desc">**중요** 표시된 핵심 키워드 색상 (추천: 오렌지/퍼플)</div>
+          <div class="setting-label">4. **강조** 및 예문 타겟 단어 색상</div>
+          <div class="setting-desc">**중요** 표시 및 예문 속 정답 단어 자동 강조색</div>
         </div>
         <div class="color-picker-group">
           ${renderColorChips('set-colorHighlightText')}
-          <input type="color" id="set-colorHighlightText" class="custom-color-input" value="${settings.colorHighlightText || '#ffa657'}" />
+          <input type="color" id="set-colorHighlightText" class="custom-color-input" value="${settings.colorHighlightText || '#ce9178'}" />
         </div>
       </div>
 
@@ -903,7 +1069,7 @@ function renderSettingsModalHtml(): string {
     <div class="modal-overlay" id="settings-modal-overlay">
       <div class="pro-modal-content" onclick="event.stopPropagation();">
         <div class="pro-modal-header">
-          <h3 style="margin: 0; font-size: 17px;">⚙️ Anki 상세 학습 설정</h3>
+          <h3 style="margin: 0; font-size: 17px;">⚙️ 상세 학습 설정</h3>
           <button id="btn-close-modal-x" class="icon-circle-btn" style="width:32px; height:32px; font-size:14px;">✕</button>
         </div>
 
@@ -976,17 +1142,16 @@ function collectCurrentTabInputs(): void {
     settings.themeMode = newTheme;
 
     if (themeChanged) {
-      // 다크 <-> 라이트 전환 시 해당 테마에 가장 잘 어울리는 기본 글자색 세트로 자동 맞춤
       if (newTheme === 'light') {
         settings.colorBaseText = '#1f2328';
         settings.colorWordText = '#0f172a';
         settings.colorMeaningText = '#0969da';
         settings.colorHighlightText = '#cf222e';
       } else {
-        settings.colorBaseText = '#e6edf3';
+        settings.colorBaseText = '#d4d4d4';
         settings.colorWordText = '#ffffff';
-        settings.colorMeaningText = '#79c0ff';
-        settings.colorHighlightText = '#ffa657';
+        settings.colorMeaningText = '#9cdcfe';
+        settings.colorHighlightText = '#ce9178';
       }
     } else {
       settings.colorBaseText = getVal('set-colorBaseText') || settings.colorBaseText;
@@ -1001,7 +1166,6 @@ function collectCurrentTabInputs(): void {
 function attachSettingsModalEvents(): void {
   if (!isSettingsModalOpen) return;
 
-  // GitHub 컬러 프리셋 동그라미 칩 클릭 시 즉시 컬러 피커 값 변경 및 미리보기 반영
   document.querySelectorAll<HTMLButtonElement>('.gh-color-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       const targetId = chip.dataset.target!;
@@ -1014,7 +1178,6 @@ function attachSettingsModalEvents(): void {
     });
   });
 
-  // 컬러 피커 직접 조작 시 실시간 반영
   document.querySelectorAll<HTMLInputElement>('.custom-color-input').forEach(input => {
     input.addEventListener('input', () => {
       collectCurrentTabInputs();
@@ -1040,7 +1203,7 @@ function attachSettingsModalEvents(): void {
   document.getElementById('btn-save-settings')?.addEventListener('click', closeAndSave);
 
   document.getElementById('btn-restore-defaults')?.addEventListener('click', () => {
-    if (confirm('인터넷 Anki 추천 국밥 세팅(익힘 2 10분, 일일 새 카드 20장, 초기 수월함 250%, 쉬움 보너스 130%)으로 모든 설정을 초기화하시겠습니까?')) {
+    if (confirm('인터넷 Anki 추천 국밥 세팅으로 모든 설정을 초기화하시겠습니까?')) {
       saveSettings({
         ...DEFAULT_ANKI_SETTINGS,
         viewMode: settings.viewMode,
@@ -1082,17 +1245,18 @@ function attachSettingsModalEvents(): void {
 }
 
 // =========================================================
-// 1. 메인 대시보드 화면
+// 1. 메인 대시보드 화면 (잔디밭 + 7일 달력 + 덱 이름 수정/상단 고정 포함)
 // =========================================================
 async function renderDashboard(): Promise<void> {
   clearSwipeListener();
+  stopAutoPlay();
   const data = await api.getStorageData();
 
   let totalCardsCount = 0;
   let totalDueTodayCount = 0;
 
   const deckListHtml = data.decks
-    .map((deck: Deck) => {
+    .map((deck: Deck, idx: number) => {
       const totalCards = deck.cards.length;
       const { queue, dueNewCount, dueRevCount } = buildDailyStudyQueue(deck, data.logs);
       const dueTotal = queue.length;
@@ -1103,7 +1267,11 @@ async function renderDashboard(): Promise<void> {
       return `
         <div class="deck-item">
           <div style="flex: 1; min-width: 0;">
-            <strong style="font-size: 16px; word-break: break-all;">📁 ${escapeHtml(deck.name)}</strong>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <strong style="font-size: 16px; word-break: break-all;">📁 ${escapeHtml(deck.name)}</strong>
+              <button type="button" class="btn-rename-deck" data-id="${deck.id}" style="background:transparent; padding:2px 5px; font-size:12px; opacity:0.65;" title="단어장 이름 수정">✏️</button>
+              ${idx > 0 ? `<button type="button" class="btn-pin-deck" data-id="${deck.id}" style="background:transparent; padding:2px 5px; font-size:12px; opacity:0.65;" title="맨 위로 올리기">📌</button>` : ''}
+            </div>
             <div class="deck-stats">
               전체: <b>${totalCards}</b>장 · 새 카드 목표: <b style="color:#10b981;">${dueNewCount}</b> · 복습 대기: <span class="due-count">${dueRevCount}</span>
             </div>
@@ -1146,7 +1314,7 @@ async function renderDashboard(): Promise<void> {
           <div class="stat-value" style="color: ${totalDueTodayCount > 0 ? '#f43f5e' : '#10b981'};">
             ${totalDueTodayCount}
           </div>
-          <div class="stat-action-hint">오늘 학습·EZ Zone 보기 ➔</div>
+          <div class="stat-action-hint">오늘 학습·대기 리스트 ➔</div>
         </div>
         <div class="stat-card stat-card-interactive" id="btn-stat-starred">
           <div class="stat-label">⭐ 중요 표시</div>
@@ -1154,6 +1322,9 @@ async function renderDashboard(): Promise<void> {
           <div class="stat-action-hint">별표 단어장·집중 복습 ➔</div>
         </div>
       </div>
+
+      <!-- 🌱 Anki 잔디밭(12주) & 📅 향후 7일 복습 예보 달력 -->
+      ${buildHeatmapAndForecastHtml(data)}
 
       <div class="card-box">
         <h3 style="margin-top: 0; font-size: 15px;">➕ 새 단어장 만들기</h3>
@@ -1206,6 +1377,36 @@ async function renderDashboard(): Promise<void> {
     await render();
   });
 
+  // ✏️ 단어장 이름 즉시 변경
+  document.querySelectorAll<HTMLButtonElement>('.btn-rename-deck').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id!;
+      const target = data.decks.find(d => d.id === id);
+      if (!target) return;
+      const newName = prompt('새 단어장 이름을 입력하세요:', target.name)?.trim();
+      if (newName && newName !== target.name) {
+        target.name = newName;
+        await api.importStorageData(data);
+        await render();
+      }
+    });
+  });
+
+  // 📌 단어장 맨 위로 고정(순서 올리기)
+  document.querySelectorAll<HTMLButtonElement>('.btn-pin-deck').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id!;
+      const idx = data.decks.findIndex(d => d.id === id);
+      if (idx > 0) {
+        const [moved] = data.decks.splice(idx, 1);
+        data.decks.unshift(moved);
+        await api.importStorageData(data);
+        triggerHaptic(12);
+        await render();
+      }
+    });
+  });
+
   document.querySelectorAll('.btn-delete-deck').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = (e.currentTarget as HTMLButtonElement).dataset.id!;
@@ -1219,6 +1420,7 @@ async function renderDashboard(): Promise<void> {
   document.querySelectorAll('.btn-manage').forEach(btn => {
     btn.addEventListener('click', (e) => {
       manageSearchQuery = '';
+      isAddCardAccordionOpen = false;
       selectedDeckId = (e.currentTarget as HTMLButtonElement).dataset.id!;
       render();
     });
@@ -1245,22 +1447,26 @@ async function renderDashboard(): Promise<void> {
       studyQueue = queue;
       currentCardIndex = 0;
       isAnswerRevealed = false;
+      determineCardDirection();
       triggerReactionBadge('Let’s go 🔥');
       await render();
       if (settings.autoPlayAudio && studyQueue[0]) {
-        speakText(studyQueue[0].front);
+        speakText(currentCardReversed ? studyQueue[0].back : studyQueue[0].front);
       }
     });
   });
 }
 
 // =========================================================
-// 2. 단어 관리 화면 (**강조** 렌더링 + 🔍 실시간 검색바 + 드래그 다중선택)
+// 2. 단어 관리 화면 (UI/UX 개선 1: 새 단어 추가 폼 아코디언 접기/펼치기 탑재)
 // =========================================================
 async function renderDeckManage(deckId: string): Promise<void> {
   const data = await api.getStorageData();
   const deck = data.decks.find(d => d.id === deckId);
   if (!deck) { selectedDeckId = null; await renderDashboard(); return; }
+
+  // 카드가 0개일 때는 자동으로 추가 폼을 열어둠
+  if (deck.cards.length === 0) isAddCardAccordionOpen = true;
 
   const validIds = new Set(deck.cards.map(c => c.id));
   selectedCardIds.forEach(id => { if (!validIds.has(id)) selectedCardIds.delete(id); });
@@ -1298,16 +1504,16 @@ async function renderDeckManage(deckId: string): Promise<void> {
             <div style="word-break: break-all; font-size: 15px;">
               <strong>Q:</strong> ${formatRichText(card.front, true)}
             </div>
-            <div style="color: #60a5fa; margin-top: 3px; word-break: break-all; font-size: 14px;">
+            <div style="color: var(--sector-meaning-color); margin-top: 3px; word-break: break-all; font-size: 14px;">
               <strong>A:</strong> ${formatRichText(card.back, true)}
             </div>
             ${card.example ? `
               <div style="color: var(--text-secondary); font-size: 12.5px; margin-top: 4px; font-style: italic; word-break: break-all;">
-                💬 "${formatRichText(card.example, true)}"
+                💬 "${formatRichText(card.example, true, card.front)}"
               </div>
             ` : ''}
             <div class="deck-stats" style="margin-top: 6px;">
-              🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b> · 수준: <b>${m.levelText}</b>
+              🕒 최근 학습: <b>${lastReviewedStr}</b> · 간격: <b>${card.interval}일</b>
             </div>
           </div>
           <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;" onclick="event.stopPropagation();">
@@ -1335,62 +1541,70 @@ async function renderDeckManage(deckId: string): Promise<void> {
         <h3 style="margin: 0; font-size: 17px; word-break: break-all; flex: 1; text-align: right;">📁 [${escapeHtml(deck.name)}]</h3>
       </div>
 
+      <!-- 📂 아코디언(접기/펼치기) 새 단어 추가 박스 -->
       <div class="card-box">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+        <div class="accordion-toggle-bar" id="btn-toggle-add-accordion">
           <div>
-            <h4 style="margin: 0; font-size: 15px;">✏️ 새 단어 추가 (예문·사진·강조·빈칸 지원)</h4>
-            <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
-              💡 <b>**중요단어**</b>로 감싸면 파란 강조체, <b>{{정답}}</b>으로 감싸면 앞면에서 빈칸([ ... ])으로 가려집니다!
-            </div>
+            <h4 style="margin: 0; font-size: 15px;">
+              ${isAddCardAccordionOpen ? '🔼 새 단어 추가 폼 접기' : '➕ 새 단어·예문·사진 추가하기 (클릭하여 펼치기 ▼)'}
+            </h4>
           </div>
-          <label class="btn-secondary" style="font-size: 12px; padding: 7px 12px; cursor: pointer; border-radius: 10px;">
-            📂 CSV 대량 등록 (단어,뜻,예문)
-            <input type="file" id="input-csv-file" accept=".csv, .tsv, .txt" style="display: none;" />
-          </label>
-        </div>
-
-        <div class="form-row">
-          <input type="text" id="input-card-front" placeholder="앞면: 단어 또는 {{빈칸}} 문장 (예: tow)" value="${escapeHtml(draftFrontText)}" />
-          <input type="text" id="input-card-back" placeholder="뒷면: 뜻 (예: **견인**하다)" value="${escapeHtml(draftBackText)}" />
-        </div>
-
-        <div style="margin-bottom: 10px;">
-          <input type="text" id="input-card-example" placeholder="💬 예문 (선택, 예: The car needed a **tow**.)" value="${escapeHtml(draftExampleText)}" />
-        </div>
-
-        <div class="image-upload-zone" id="image-drop-zone" tabindex="0" style="outline: none;">
-          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            ${pendingCardImageData ? `
-              <img src="${pendingCardImageData}" class="image-preview-thumb" style="width: 64px; height: 64px;" alt="preview" />
-              <div>
-                <div style="color: #10b981; font-weight: 700; font-size: 13.5px;">✅ 이미지 준비 완료!</div>
-                <div style="font-size: 11.5px; color: var(--text-secondary);">새 카드로 등록하거나, 아래 목록에서 단어를 체크해 이 사진을 입힐 수 있습니다.</div>
-              </div>
-            ` : `
-              <span>🖼️ <b>사진 첨부:</b> 이 화면 어디서든 <b>Ctrl + V</b>를 누르면 클립보드 이미지가 즉시 들어갑니다!</span>
-            `}
-          </div>
-          <div style="display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap;">
-            ${pendingCardImageData && selectedCardIds.size > 0 ? `
-              <button type="button" id="btn-apply-img-selected" class="btn-primary" style="background: #10b981; padding: 7px 12px; font-size: 12px;">
-                🎯 선택된 ${selectedCardIds.size}개 단어에 이 사진 적용
-              </button>
-            ` : ''}
-            ${pendingCardImageData ? `
-              <button type="button" id="btn-clear-img" class="btn-danger" style="padding: 6px 10px; font-size: 12px;">사진 비우기</button>
-            ` : ''}
-            <label class="btn-secondary" style="padding: 7px 12px; font-size: 12px; cursor: pointer; border-radius: 8px;">
-              📷 파일 선택
-              <input type="file" id="input-card-image" accept="image/*" style="display: none;" />
+          <div style="display: flex; gap: 8px; align-items: center;" onclick="event.stopPropagation();">
+            <label class="btn-secondary" style="font-size: 12px; padding: 7px 12px; cursor: pointer; border-radius: 10px;">
+              📂 CSV 대량 등록
+              <input type="file" id="input-csv-file" accept=".csv, .tsv, .txt" style="display: none;" />
             </label>
           </div>
         </div>
 
-        <button id="btn-add-card" class="btn-primary" style="width: 100%; padding: 13px;">➕ 새 단어로 카드 등록</button>
+        ${isAddCardAccordionOpen ? `
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <div style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 10px;">
+              💡 <b>**중요**</b>는 강조체, <b>{{정답}}</b>은 빈칸 문제, 예문 속 영단어는 자동으로 하이라이트됩니다.
+            </div>
+            <div class="form-row">
+              <input type="text" id="input-card-front" placeholder="앞면: 단어 또는 {{빈칸}} 문장 (예: tow)" value="${escapeHtml(draftFrontText)}" />
+              <input type="text" id="input-card-back" placeholder="뒷면: 뜻 (예: **견인**하다)" value="${escapeHtml(draftBackText)}" />
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <input type="text" id="input-card-example" placeholder="💬 예문 (선택, 예: The car needed a tow.)" value="${escapeHtml(draftExampleText)}" />
+            </div>
+
+            <div class="image-upload-zone" id="image-drop-zone" tabindex="0" style="outline: none;">
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                ${pendingCardImageData ? `
+                  <img src="${pendingCardImageData}" class="image-preview-thumb" style="width: 64px; height: 64px;" alt="preview" />
+                  <div>
+                    <div style="color: #10b981; font-weight: 700; font-size: 13.5px;">✅ 이미지 준비 완료!</div>
+                    <div style="font-size: 11.5px; color: var(--text-secondary);">새 카드로 등록하거나 아래 체크된 단어에 바로 적용할 수 있습니다.</div>
+                  </div>
+                ` : `
+                  <span>🖼️ <b>사진 첨부:</b> 화면 어디서든 <b>Ctrl + V</b>를 누르면 클립보드 이미지가 즉시 들어갑니다!</span>
+                `}
+              </div>
+              <div style="display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap;">
+                ${pendingCardImageData && selectedCardIds.size > 0 ? `
+                  <button type="button" id="btn-apply-img-selected" class="btn-primary" style="background: #10b981; padding: 7px 12px; font-size: 12px;">
+                    🎯 선택된 ${selectedCardIds.size}개 단어에 이 사진 적용
+                  </button>
+                ` : ''}
+                ${pendingCardImageData ? `
+                  <button type="button" id="btn-clear-img" class="btn-danger" style="padding: 6px 10px; font-size: 12px;">사진 비우기</button>
+                ` : ''}
+                <label class="btn-secondary" style="padding: 7px 12px; font-size: 12px; cursor: pointer; border-radius: 8px;">
+                  📷 파일 선택
+                  <input type="file" id="input-card-image" accept="image/*" style="display: none;" />
+                </label>
+              </div>
+            </div>
+
+            <button id="btn-add-card" class="btn-primary" style="width: 100%; padding: 13px;">➕ 새 단어로 카드 등록</button>
+          </div>
+        ` : ''}
       </div>
 
       <div class="card-box" style="flex: 1;">
-        <!-- 🔍 실시간 단어 검색바 -->
         <div class="search-input-wrap">
           <span class="search-icon-prefix">🔍</span>
           <input type="text" id="input-manage-search" placeholder="등록된 단어, 뜻, 예문 실시간 검색..." value="${escapeHtml(manageSearchQuery)}" />
@@ -1438,7 +1652,11 @@ async function renderDeckManage(deckId: string): Promise<void> {
     ${renderSettingsModalHtml()}
   `;
 
-  // 실시간 검색 이벤트 (포커스 유지)
+  document.getElementById('btn-toggle-add-accordion')?.addEventListener('click', () => {
+    isAddCardAccordionOpen = !isAddCardAccordionOpen;
+    render();
+  });
+
   const searchEl = document.getElementById('input-manage-search') as HTMLInputElement | null;
   searchEl?.addEventListener('input', () => {
     const cursorPos = searchEl.selectionStart || 0;
@@ -1477,6 +1695,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
   document.getElementById('btn-back')?.addEventListener('click', goBackToDashboard);
   attachSwipeBackListener(goBackToDashboard);
 
+  // Ctrl+V 이미지 붙여넣기 시 아코디언이 닫혀 있어도 자동으로 열어주며 첨부!
   document.onpaste = async (e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -1486,6 +1705,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
         e.preventDefault();
         const blob = item.getAsFile();
         if (blob) {
+          isAddCardAccordionOpen = true;
           pendingCardImageData = await compressImageToDataUrl(blob);
           triggerHaptic(15);
           await render();
@@ -1513,7 +1733,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
     for (const cardId of selectedCardIds) {
       await api.updateCard(deck.id, cardId, { imageData: pendingCardImageData });
     }
-    alert(`🎉 선택된 ${selectedCardIds.size}개 단어에 사진이 성공적으로 적용되었습니다!`);
+    alert(`🎉 선택된 ${selectedCardIds.size}개 단어에 사진이 적용되었습니다!`);
     pendingCardImageData = undefined;
     selectedCardIds.clear();
     await render();
@@ -1556,7 +1776,7 @@ async function renderDeckManage(deckId: string): Promise<void> {
 
   document.getElementById('btn-bulk-delete')?.addEventListener('click', async () => {
     if (selectedCardIds.size === 0) return;
-    if (confirm(`선택한 ${selectedCardIds.size}개의 단어를 한 번에 삭제하시겠습니까?`)) {
+    if (confirm(`선택한 ${selectedCardIds.size}개의 단어를 삭제하시겠습니까?`)) {
       for (const cardId of [...selectedCardIds]) {
         await api.deleteCard(deck.id, cardId);
       }
@@ -1724,15 +1944,14 @@ async function renderDeckManage(deckId: string): Promise<void> {
 }
 
 // =========================================================
-// 3. 플래시카드 학습룸 (PC 1-2-3-4 / 모바일 1-2-4-3 + Edit + Undo + {{빈칸}} 지원)
+// 3. 플래시카드 학습룸 (양방향 + 스펠링 타이핑 + 오토플레이 + 사진 줌 + 예문 자동하이라이트)
 // =========================================================
 async function renderStudyRoom(): Promise<void> {
   if (currentCardIndex >= studyQueue.length) {
     stopCardTimer();
+    stopAutoPlay();
     clearSwipeListener();
-    const wasStarCram = isStarCramMode;
 
-    // 최신 저장소 데이터에서 방금 공부한 고유 카드 목록 추출
     const freshData = await api.getStorageData();
     const uniqueCardMap = new Map<string, Card>();
     studyQueue.forEach(qCard => {
@@ -1778,23 +1997,22 @@ async function renderStudyRoom(): Promise<void> {
               <div style="font-size: 15px; word-break: break-all;">
                 <strong>Q:</strong> ${formatRichText(card.front, true)}
               </div>
-              <div style="color: #60a5fa; font-size: 14px; margin-top: 2px; word-break: break-all;">
+              <div style="color: var(--sector-meaning-color); font-size: 14px; margin-top: 2px; word-break: break-all;">
                 <strong>A:</strong> ${formatRichText(card.back, true)}
               </div>
               ${card.example ? `
                 <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px; font-style: italic;">
-                  💬 "${formatRichText(card.example, true)}"
+                  💬 "${formatRichText(card.example, true, card.front)}"
                 </div>
               ` : ''}
             </div>
 
-            <!-- 결과 화면에서 바로 사진 등록(📷), 단어 수정(✏️), 별표(★) 조작 -->
             <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
               <label class="btn-secondary" style="padding: 6px 9px; font-size: 12px; cursor: pointer; border-radius: 8px;" title="이 단어에 사진 등록/변경">
                 📷
                 <input type="file" class="result-card-img-input" data-deck-id="${card.deckId}" data-card-id="${card.id}" accept="image/*" style="display: none;" />
               </label>
-              <button type="button" class="btn-secondary btn-result-edit" data-card-id="${card.id}" style="padding: 6px 10px; font-size: 12px; border-radius: 8px;" title="단어/뜻/예문 즉시 수정">
+              <button type="button" class="btn-secondary btn-result-edit" data-card-id="${card.id}" style="padding: 6px 10px; font-size: 12px; border-radius: 8px;">
                 ✏️ 수정
               </button>
               <button type="button" class="btn-result-star" data-card-id="${card.id}" style="background: transparent; font-size: 22px; padding: 2px 6px; color: ${isStar ? '#84cc16' : 'var(--text-secondary)'};">
@@ -1820,7 +2038,6 @@ async function renderStudyRoom(): Promise<void> {
           <button id="btn-finish-study" class="btn-primary" style="padding: 10px 18px;">🏠 대시보드로 완료</button>
         </div>
 
-        <!-- 1. 정답률 / 정답 수 / 오답 수 요약 카드 (클릭 시 아래 리스트 필터링) -->
         <div class="stats-grid">
           <div class="stat-card stat-card-interactive" id="tab-filter-all" style="${resultFilterTab === 'all' ? 'border-color: var(--accent-blue);' : ''}">
             <div class="stat-label">🎯 전체 학습 (정답률 ${accuracyPct}%)</div>
@@ -1839,7 +2056,6 @@ async function renderStudyRoom(): Promise<void> {
           </div>
         </div>
 
-        <!-- 2. SM-2 스케줄 영향 없는 순수 플래시카드 즉시 재복습 버튼 박스 -->
         <div class="card-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
           <div>
             <h4 style="margin: 0; font-size: 15px;">⚡ SM-2 제외 순수 플래시카드 바로 복습</h4>
@@ -1862,7 +2078,6 @@ async function renderStudyRoom(): Promise<void> {
           </div>
         </div>
 
-        <!-- 3. 정답 / 오답 상세 리스트 (사진 등록 & 단어 수정 직접 가능) -->
         <div class="card-box" style="flex: 1;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <h4 style="margin: 0; font-size: 15px;">
@@ -1876,7 +2091,6 @@ async function renderStudyRoom(): Promise<void> {
         </div>
       </div>
 
-      <!-- ✏️ 결과 화면 내 단어 즉시 수정 모달 -->
       ${isEditCardModalOpen && targetEdit ? `
         <div class="modal-overlay" id="result-edit-overlay">
           <div class="modal-content" style="max-width: 460px;" onclick="event.stopPropagation();">
@@ -1904,12 +2118,10 @@ async function renderStudyRoom(): Promise<void> {
       ` : ''}
     `;
 
-    // 탭 필터 전환
     document.getElementById('tab-filter-all')?.addEventListener('click', () => { resultFilterTab = 'all'; render(); });
     document.getElementById('tab-filter-correct')?.addEventListener('click', () => { resultFilterTab = 'correct'; render(); });
     document.getElementById('tab-filter-wrong')?.addEventListener('click', () => { resultFilterTab = 'wrong'; render(); });
 
-    // 대시보드로 완전히 나가기
     document.getElementById('btn-finish-study')?.addEventListener('click', () => {
       studyingDeckId = null;
       isStarCramMode = false;
@@ -1918,21 +2130,19 @@ async function renderStudyRoom(): Promise<void> {
       render();
     });
 
-    // 🔥 오답만 바로 복습 (SM-2 미적용 자유 복습 플래시카드 모드)
     document.getElementById('btn-cram-wrong-only')?.addEventListener('click', async () => {
       if (wrongCards.length === 0) return;
       isStarCramMode = true;
       sessionResultsMap.clear();
       resultFilterTab = 'all';
-      // 순서 외움 방지를 위해 가볍게 섞어서 출제
       studyQueue = [...wrongCards].sort(() => Math.random() - 0.5);
       currentCardIndex = 0;
       isAnswerRevealed = false;
+      determineCardDirection();
       triggerReactionBadge('오답 집중 복습 🔥');
       await render();
     });
 
-    // ✅ 정답만 다시 복습 (SM-2 미적용 자유 복습 플래시카드 모드)
     document.getElementById('btn-cram-correct-only')?.addEventListener('click', async () => {
       if (correctCards.length === 0) return;
       isStarCramMode = true;
@@ -1941,11 +2151,11 @@ async function renderStudyRoom(): Promise<void> {
       studyQueue = [...correctCards].sort(() => Math.random() - 0.5);
       currentCardIndex = 0;
       isAnswerRevealed = false;
+      determineCardDirection();
       triggerReactionBadge('정답 확인 복습 ✅');
       await render();
     });
 
-    // ⭐ 오답 전체 별표 일괄 찍기
     document.getElementById('btn-star-all-wrong')?.addEventListener('click', () => {
       wrongCards.forEach(c => starredCardIds.add(c.id));
       localStorage.setItem(STARRED_CARDS_KEY, JSON.stringify([...starredCardIds]));
@@ -1954,7 +2164,6 @@ async function renderStudyRoom(): Promise<void> {
       render();
     });
 
-    // 결과 리스트에서 개별 별표 토글
     document.querySelectorAll<HTMLButtonElement>('.btn-result-star').forEach(btn => {
       btn.addEventListener('click', () => {
         toggleStarCard(btn.dataset.cardId!);
@@ -1962,7 +2171,6 @@ async function renderStudyRoom(): Promise<void> {
       });
     });
 
-    // 결과 리스트에서 📷 버튼으로 사진 즉시 등록/변경
     document.querySelectorAll<HTMLInputElement>('.result-card-img-input').forEach(input => {
       input.addEventListener('change', async (e) => {
         const file = (e.target as HTMLInputElement).files?.[0];
@@ -1971,14 +2179,12 @@ async function renderStudyRoom(): Promise<void> {
         if (!file || !cardId || !deckId) return;
         const compressed = await compressImageToDataUrl(file);
         await api.updateCard(deckId, cardId, { imageData: compressed });
-        // 현재 큐에도 반영
         const qTarget = studyQueue.find(c => c.id === cardId);
         if (qTarget) qTarget.imageData = compressed;
         await render();
       });
     });
 
-    // 결과 리스트에서 ✏️ 수정 버튼 클릭 시 모달 오픈
     document.querySelectorAll<HTMLButtonElement>('.btn-result-edit').forEach(btn => {
       btn.addEventListener('click', () => {
         const cardId = btn.dataset.cardId!;
@@ -2026,7 +2232,10 @@ async function renderStudyRoom(): Promise<void> {
   const isStarred = starredCardIds.has(currentCard.id);
   const previewLabels = SM2Scheduler.getPreviewLabels(currentCard, settings);
 
-  // 💻 PC 모드는 1-2-3-4 순서대로, 📱 모바일 모드는 오른손 엄지를 위해 1-2-4-3 순서로 배치!
+  // 🔄 양방향 학습 적용: currentCardReversed가 true이면 뜻을 먼저 보여주고 영단어를 맞힘!
+  const questionText = currentCardReversed ? currentCard.back : currentCard.front;
+  const answerText = currentCardReversed ? currentCard.front : currentCard.back;
+
   const ratingButtonsOrder: { rating: ReviewRating; label: string; isGood?: boolean }[] =
     settings.viewMode === 'pc'
       ? [
@@ -2055,6 +2264,31 @@ async function renderStudyRoom(): Promise<void> {
     )
     .join('');
 
+  // ⌨️ 타이핑 모드 정오답 글자 비교 렌더링
+  let typingResultHtml = '';
+  if (isTypingMode && isAnswerRevealed && lastTypedAttempt) {
+    const cleanTarget = answerText.replace(/\*\*/g, '').replace(/\{\{|\}\}/g, '').trim();
+    const isExactMatch = lastTypedAttempt.toLowerCase() === cleanTarget.toLowerCase();
+    if (isExactMatch) {
+      typingResultHtml = `<div class="typing-feedback char-correct">🎯 완벽합니다! (${escapeHtml(lastTypedAttempt)})</div>`;
+    } else {
+      const charsHtml = cleanTarget
+        .split('')
+        .map((ch, i) => {
+          const typedCh = lastTypedAttempt[i] || '';
+          const match = typedCh.toLowerCase() === ch.toLowerCase();
+          return `<span class="${match ? 'char-correct' : 'char-wrong'}">${escapeHtml(ch)}</span>`;
+        })
+        .join('');
+      typingResultHtml = `
+        <div class="typing-feedback">
+          <span style="font-size:12px; color:var(--text-secondary);">내 입력: ${escapeHtml(lastTypedAttempt)} ➔ 정답 비교: </span>
+          ${charsHtml}
+        </div>
+      `;
+    }
+  }
+
   appElement!.innerHTML = `
     <div class="container">
       <div class="study-topbar">
@@ -2077,6 +2311,19 @@ async function renderStudyRoom(): Promise<void> {
         <div class="study-progress-fill" style="width: ${progressPercent}%; ${isStarCramMode ? 'background: linear-gradient(90deg, #84cc16, #10b981);' : ''}"></div>
       </div>
 
+      <!-- 🎛️ 학습 모드 컨트롤 칩 바 (양방향 전환 / 스펠링 타이핑 / 핸즈프리 자동재생) -->
+      <div class="study-mode-toolbar">
+        <button type="button" id="btn-cycle-direction" class="mode-chip-btn ${studyDirection !== 'front-to-back' ? 'active' : ''}">
+          🔄 ${studyDirection === 'front-to-back' ? '단어 ➔ 뜻' : studyDirection === 'back-to-front' ? '뜻 ➔ 단어' : '앞·뒤 랜덤'}
+        </button>
+        <button type="button" id="btn-toggle-typing" class="mode-chip-btn ${isTypingMode ? 'active' : ''}">
+          ⌨️ 스펠링 타이핑 ${isTypingMode ? 'ON' : 'OFF'}
+        </button>
+        <button type="button" id="btn-toggle-autoplay" class="mode-chip-btn ${isAutoPlayMode ? 'active' : ''}">
+          ${isAutoPlayMode ? '⏸️ 자동재생 중' : '▶️ 자동재생'}
+        </button>
+      </div>
+
       <div class="study-box" id="study-card-body">
         <button id="btn-star-card" class="card-star-btn ${isStarred ? 'starred' : ''}">
           ${isStarred ? '★' : '☆'}
@@ -2088,26 +2335,35 @@ async function renderStudyRoom(): Promise<void> {
           </div>
         ` : ''}
 
-        <!-- 1. 정답 확인 시 가장 상단에 큼직한 사진 배치 -->
+        <!-- 1. 정답 확인 시 상단 큰 사진 (클릭 시 전체화면 Lightbox 확대!) -->
         ${isAnswerRevealed && currentCard.imageData ? `
           <div class="study-top-image-wrap">
-            <img src="${currentCard.imageData}" class="study-top-image" alt="visual memory aid" onerror="this.parentElement.style.display='none'" />
+            <img src="${currentCard.imageData}" id="study-zoomable-img" class="study-top-image" title="클릭하여 크게 보기" alt="visual memory aid" onerror="this.parentElement.style.display='none'" />
           </div>
         ` : ''}
 
-        <!-- 2. 중간: 영어 단어 ({{빈칸}}이 있으면 앞면엔 가리고 뒷면엔 정답 공개!) -->
-        <div class="study-question">${formatRichText(currentCard.front, isAnswerRevealed)}</div>
+        <!-- 2. 중간: 질문 텍스트 -->
+        <div class="study-question">${formatRichText(questionText, isAnswerRevealed)}</div>
 
-        <!-- 3. 그 밑에 뜻 & 4. 맨 밑에 예문 -->
+        <!-- ⌨️ 타이핑 모드일 때 앞면에서 직접 입력하는 칸 -->
+        ${isTypingMode && !isAnswerRevealed ? `
+          <div class="typing-quiz-box" onclick="event.stopPropagation();">
+            <input type="text" id="input-typing-answer" placeholder="정답을 타이핑 후 Enter..." autocomplete="off" />
+            <button type="button" id="btn-submit-typing" class="btn-primary" style="padding: 10px 16px;">체크</button>
+          </div>
+        ` : ''}
+
+        <!-- 3. 그 밑에 정답 & 4. 맨 밑에 예문 (예문 속 타겟 단어 자동 하이라이트 적용!) -->
         ${isAnswerRevealed ? `
           <div class="study-divider"></div>
           <div class="study-back-container">
-            <div class="study-answer">${formatRichText(currentCard.back, true)}</div>
+            ${typingResultHtml}
+            <div class="study-answer">${formatRichText(answerText, true)}</div>
 
             ${currentCard.example ? `
               <div class="study-divider" style="width: 55%; margin: 10px auto;"></div>
               <div class="study-example-box">
-                <div class="study-example-text">💬 "${formatRichText(currentCard.example, true)}"</div>
+                <div class="study-example-text">💬 "${formatRichText(currentCard.example, true, currentCard.front)}"</div>
                 <button type="button" id="btn-speak-example" class="icon-circle-btn" style="width: 32px; height: 32px; font-size: 14px; flex-shrink: 0;" title="예문 발음 듣기">🔉</button>
               </div>
             ` : ''}
@@ -2119,7 +2375,6 @@ async function renderStudyRoom(): Promise<void> {
         <button id="btn-speak-card" class="card-speaker-btn" title="발음 듣기">🔊</button>
       </div>
 
-      <!-- 하단 컨트롤 바 (좌측: Edit 즉시 수정 / 중앙: 글래스 구슬 버튼 / 우측: Undo 되돌리기) -->
       <div class="study-footer-bar">
         <button type="button" id="btn-edit-current-card" class="glass-pill-btn side-glass-btn" title="현재 카드 즉시 수정">
           ✏️ Edit
@@ -2155,6 +2410,13 @@ async function renderStudyRoom(): Promise<void> {
     </div>
     ${renderSettingsModalHtml()}
 
+    <!-- 🔍 사진 전체화면 확대 Lightbox 모달 -->
+    ${zoomedImageUrl ? `
+      <div class="modal-overlay" id="lightbox-overlay" style="background: rgba(0,0,0,0.82); backdrop-filter: blur(6px);">
+        <img src="${zoomedImageUrl}" class="lightbox-img" alt="zoomed" />
+      </div>
+    ` : ''}
+
     <!-- ✏️ 학습 중 즉시 카드 수정(Edit) 모달 -->
     ${isEditCardModalOpen ? `
       <div class="modal-overlay" id="edit-card-overlay">
@@ -2182,7 +2444,7 @@ async function renderStudyRoom(): Promise<void> {
       </div>
     ` : ''}
 
-    <!-- 🛑 ✕ 버튼 클릭 시 뜨는 종료 확인 상자 -->
+    <!-- 🛑 ✕ 버튼 종료 확인 상자 -->
     ${isQuitConfirmModalOpen ? `
       <div class="modal-overlay" id="quit-confirm-overlay">
         <div class="modal-content" style="max-width: 380px; text-align: center;" onclick="event.stopPropagation();">
@@ -2210,7 +2472,64 @@ async function renderStudyRoom(): Promise<void> {
     startCardTimer();
   }
 
+  if (isAutoPlayMode) {
+    scheduleNextAutoPlayStep();
+  }
+
+  // 타이핑 모드 입력창 자동 포커스 및 엔터 제출
+  const typingInput = document.getElementById('input-typing-answer') as HTMLInputElement | null;
+  if (typingInput && !isAnswerRevealed) {
+    typingInput.focus();
+    const submitTyping = () => {
+      lastTypedAttempt = typingInput.value.trim();
+      isAnswerRevealed = true;
+      render();
+    };
+    typingInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        submitTyping();
+      }
+    });
+    document.getElementById('btn-submit-typing')?.addEventListener('click', submitTyping);
+  }
+
+  // 상단 3대 모드 칩 이벤트
+  document.getElementById('btn-cycle-direction')?.addEventListener('click', () => {
+    if (studyDirection === 'front-to-back') studyDirection = 'back-to-front';
+    else if (studyDirection === 'back-to-front') studyDirection = 'random';
+    else studyDirection = 'front-to-back';
+    determineCardDirection();
+    isAnswerRevealed = false;
+    render();
+  });
+
+  document.getElementById('btn-toggle-typing')?.addEventListener('click', () => {
+    isTypingMode = !isTypingMode;
+    lastTypedAttempt = '';
+    render();
+  });
+
+  document.getElementById('btn-toggle-autoplay')?.addEventListener('click', () => {
+    isAutoPlayMode = !isAutoPlayMode;
+    if (!isAutoPlayMode) stopAutoPlay();
+    render();
+  });
+
+  // 사진 클릭 시 전체화면 Lightbox 확대
+  document.getElementById('study-zoomable-img')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    zoomedImageUrl = currentCard.imageData || null;
+    render();
+  });
+  document.getElementById('lightbox-overlay')?.addEventListener('click', () => {
+    zoomedImageUrl = null;
+    render();
+  });
+
   document.getElementById('btn-open-settings')?.addEventListener('click', () => {
+    stopAutoPlay();
     isSettingsModalOpen = true;
     render();
   });
@@ -2218,8 +2537,8 @@ async function renderStudyRoom(): Promise<void> {
 
   clearSwipeListener();
 
-  // ✏️ Edit 버튼 이벤트
   document.getElementById('btn-edit-current-card')?.addEventListener('click', () => {
+    stopAutoPlay();
     isEditCardModalOpen = true;
     render();
   });
@@ -2247,24 +2566,25 @@ async function renderStudyRoom(): Promise<void> {
     await render();
   });
 
-  // ↩️ Undo (직전 카드 되돌리기) 실행 함수
   const performUndo = async () => {
     const lastSnap = undoHistoryStack.pop();
     if (!lastSnap) return;
+    stopAutoPlay();
     triggerHaptic(15);
     await api.importStorageData(lastSnap.storageSnapshot);
     studyQueue = lastSnap.queueSnapshot;
     currentCardIndex = lastSnap.cardIndex;
     isAnswerRevealed = false;
+    determineCardDirection();
     triggerReactionBadge('되돌리기 완료 ↩️');
     await render();
   };
   document.getElementById('btn-undo-card')?.addEventListener('click', performUndo);
   document.getElementById('btn-undo-bottom')?.addEventListener('click', performUndo);
 
-  // ✕ 종료 확인 모달 이벤트
   document.getElementById('btn-quit-study')?.addEventListener('click', (e) => {
     e.stopPropagation();
+    stopAutoPlay();
     triggerHaptic(12);
     saveProgressOnQuit = true;
     isQuitConfirmModalOpen = true;
@@ -2290,6 +2610,7 @@ async function renderStudyRoom(): Promise<void> {
     studySessionSnapshot = null;
     undoHistoryStack = [];
     stopCardTimer();
+    stopAutoPlay();
     window.speechSynthesis?.cancel();
     studyingDeckId = null;
     isStarCramMode = false;
@@ -2338,23 +2659,23 @@ async function renderStudyRoom(): Promise<void> {
     document.getElementById('btn-cram-retry')?.addEventListener('click', async () => {
       triggerHaptic(15);
       triggerReactionBadge('One more time 💪');
-      // 자유 복습에서 '다시 보기'를 누르면 오답(wrong)으로 기록
       sessionResultsMap.set(currentCard.id, 'wrong');
       studyQueue.push({ ...currentCard });
       currentCardIndex++;
       isAnswerRevealed = false;
+      determineCardDirection();
       await render();
     });
 
     document.getElementById('btn-cram-pass')?.addEventListener('click', async () => {
       triggerHaptic(15);
       triggerReactionBadge('Got it! ⭐');
-      // 이전에 틀린 적이 없을 때만 정답(correct)으로 기록
       if (!sessionResultsMap.has(currentCard.id)) {
         sessionResultsMap.set(currentCard.id, 'correct');
       }
       currentCardIndex++;
       isAnswerRevealed = false;
+      determineCardDirection();
       await render();
     });
   } else {
@@ -2369,16 +2690,14 @@ async function renderStudyRoom(): Promise<void> {
   }
 
   setKeyboardListener(async (e: KeyboardEvent) => {
-    if (isSettingsModalOpen || isQuitConfirmModalOpen || isEditCardModalOpen) return;
+    if (isSettingsModalOpen || isQuitConfirmModalOpen || isEditCardModalOpen || zoomedImageUrl) return;
+    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
 
-    // 🛑 1. 키보드를 꾹 누르고 있을 때 발생하는 자동 연타(Auto-Repeat)를 100% 차단!
-    // (반드시 손가락을 뗐다가 다시 눌러야만 다음 동작으로 넘어감)
     if (e.repeat) {
       e.preventDefault();
       return;
     }
 
-    // 🛑 2. 카드 전환 중이거나 0.12초(120ms) 이내의 비정상적 기계 채터링 입력 차단
     const now = Date.now();
     if (isProcessingRating || now - lastKeyActionTime < 120) {
       e.preventDefault();
@@ -2418,7 +2737,7 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
   const currentCard = studyQueue[currentCardIndex];
   if (!studyingDeckId || !currentCard) return;
 
-  isProcessingRating = true; // 다음 카드 렌더링 완료 전까지 중복 평가 잠금
+  isProcessingRating = true;
   const durationSec = stopCardTimer();
   triggerHaptic(18);
 
@@ -2429,7 +2748,6 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
     queueSnapshot: JSON.parse(JSON.stringify(studyQueue))
   });
 
-  // 📊 1번(다시)을 누르면 오답('wrong'), 2~4번을 누르면 정답('correct')으로 분류 기록!
   if (rating === 1) {
     sessionResultsMap.set(currentCard.id, 'wrong');
   } else if (!sessionResultsMap.has(currentCard.id)) {
@@ -2449,11 +2767,12 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
   setTimeout(async () => {
     currentCardIndex++;
     isAnswerRevealed = false;
-    isProcessingRating = false; // 다음 카드 도착 완료 -> 잠금 해제!
+    isProcessingRating = false;
+    determineCardDirection();
     await render();
 
     if (settings.autoPlayAudio && studyQueue[currentCardIndex]) {
-      speakText(studyQueue[currentCardIndex].front);
+      speakText(currentCardReversed ? studyQueue[currentCardIndex].back : studyQueue[currentCardIndex].front);
     }
   }, 160);
 }
@@ -2468,20 +2787,31 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * **강조** 문법과 {{빈칸}} (Cloze Deletion) 문법을 동시에 처리하는 포매터
- * @param text 원본 텍스트
- * @param revealCloze true이면 {{내용}}을 정답으로 보여주고, false이면 [ ... ] 빈칸으로 가림
+ * **강조**, {{빈칸}}, 그리고 예문 속 타겟 단어(targetWord) 자동 하이라이트를 처리하는 스마트 포매터
  */
-function formatRichText(text: string, revealCloze = true): string {
+function formatRichText(text: string, revealCloze = true, targetWord?: string): string {
   let formatted = escapeHtml(text);
-  // 1. **강조** -> 파란색 굵은 하이라이트
+
+  // 1. **강조** -> 섹터 4 포인트 색상 하이라이트
   formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong class="text-highlight">$1</strong>');
-  // 2. {{빈칸}} -> 앞면에서는 [ ... ], 뒷면 및 목록에서는 초록색 정답 하이라이트
+
+  // 2. {{빈칸}} -> 앞면에서는 [ ... ], 뒷면에서는 초록색 정답 하이라이트
   formatted = formatted.replace(/\{\{(.+?)\}\}/g, (_, answer) => {
     return revealCloze
       ? `<span class="cloze-revealed">${answer}</span>`
       : `<span class="cloze-blank">[ &nbsp;...&nbsp; ]</span>`;
   });
+
+  // 3. 예문 내 타겟 단어(앞면 단어) 자동 감지 하이라이트
+  if (targetWord) {
+    const cleanTarget = targetWord.replace(/\*\*/g, '').replace(/\{\{|\}\}/g, '').trim();
+    if (cleanTarget.length >= 2 && !formatted.includes('text-highlight')) {
+      const escapedTarget = cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(${escapedTarget})`, 'gi');
+      formatted = formatted.replace(regex, '<strong class="text-highlight">$1</strong>');
+    }
+  }
+
   return formatted;
 }
 
