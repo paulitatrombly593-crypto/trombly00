@@ -77,6 +77,13 @@ function saveSettings(newSettings: AnkiSettings): void {
 function applyDisplayClasses(): void {
   document.body.classList.remove('mode-pc', 'mode-mobile', 'theme-dark', 'theme-light');
   document.body.classList.add(`mode-${settings.viewMode}`, `theme-${settings.themeMode}`);
+
+  // 4대 섹터별 글자색 CSS 변수 실시간 반영
+  const root = document.documentElement;
+  root.style.setProperty('--sector-base-color', settings.colorBaseText || '#e6edf3');
+  root.style.setProperty('--sector-word-color', settings.colorWordText || '#ffffff');
+  root.style.setProperty('--sector-meaning-color', settings.colorMeaningText || '#79c0ff');
+  root.style.setProperty('--sector-highlight-color', settings.colorHighlightText || '#ffa657');
 }
 
 applyDisplayClasses();
@@ -793,8 +800,23 @@ function renderSettingsModalHtml(): string {
       </div>
     `;
   } else {
+    // GitHub Dark+ 대표 신택스 컬러 5종 프리셋 칩 생성 헬퍼
+    const renderColorChips = (targetInputId: string) => {
+      const ghColors = [
+        { hex: '#e6edf3', name: 'GitHub White' },
+        { hex: '#79c0ff', name: 'GitHub Sky Blue' },
+        { hex: '#7ee787', name: 'GitHub Mint Green' },
+        { hex: '#ffa657', name: 'GitHub Orange' },
+        { hex: '#d2a8ff', name: 'GitHub Purple' },
+        { hex: '#ff7b72', name: 'GitHub Coral Red' }
+      ];
+      return ghColors
+        .map(c => `<button type="button" class="gh-color-chip" data-target="${targetInputId}" data-hex="${c.hex}" style="background:${c.hex};" title="${c.name}"></button>`)
+        .join('');
+    };
+
     rightPanelHtml = `
-      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🎨 화면 모드 및 데이터 백업</h4>
+      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🎨 GitHub Dark+ 테마 &amp; 섹터별 글자색 설정</h4>
       <div class="setting-row">
         <div>
           <div class="setting-label">화면 레이아웃 모드</div>
@@ -807,15 +829,61 @@ function renderSettingsModalHtml(): string {
       </div>
       <div class="setting-row">
         <div>
-          <div class="setting-label">컬러 테마</div>
-          <div class="setting-desc">몰입형 다크 모드 vs 차분한 라이트 모드</div>
+          <div class="setting-label">배경 테마 (테마 변경 시 추천 글자색 자동 세팅)</div>
+          <div class="setting-desc">GitHub Dark+ (#0d1117) vs 라이트 모드</div>
         </div>
         <select id="set-themeMode" class="setting-select">
-          <option value="dark" ${settings.themeMode === 'dark' ? 'selected' : ''}>🌙 다크 모드</option>
+          <option value="dark" ${settings.themeMode === 'dark' ? 'selected' : ''}>🐙 GitHub Dark+ 모드</option>
           <option value="light" ${settings.themeMode === 'light' ? 'selected' : ''}>☀️ 라이트 모드</option>
         </select>
       </div>
-      <div class="setting-row" style="margin-top: 12px; padding-top: 16px;">
+
+      <!-- 4대 섹터별 글자색 커스텀 지정 -->
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">1. 기본 UI 글자색 (홈·설정·목록)</div>
+          <div class="setting-desc">전체 화면의 기본 안내 텍스트 색상</div>
+        </div>
+        <div class="color-picker-group">
+          ${renderColorChips('set-colorBaseText')}
+          <input type="color" id="set-colorBaseText" class="custom-color-input" value="${settings.colorBaseText || '#e6edf3'}" />
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">2. 학습 시 '단어(앞면)' 글자색</div>
+          <div class="setting-desc">플래시카드 중앙 영단어/질문 색상</div>
+        </div>
+        <div class="color-picker-group">
+          ${renderColorChips('set-colorWordText')}
+          <input type="color" id="set-colorWordText" class="custom-color-input" value="${settings.colorWordText || '#ffffff'}" />
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">3. 학습 시 '뜻(뒷면)' 글자색</div>
+          <div class="setting-desc">정답 확인 시 나타나는 뜻 색상 (추천: 스카이블루/민트)</div>
+        </div>
+        <div class="color-picker-group">
+          ${renderColorChips('set-colorMeaningText')}
+          <input type="color" id="set-colorMeaningText" class="custom-color-input" value="${settings.colorMeaningText || '#79c0ff'}" />
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">4. **강조** 포인트 글자색</div>
+          <div class="setting-desc">**중요** 표시된 핵심 키워드 색상 (추천: 오렌지/퍼플)</div>
+        </div>
+        <div class="color-picker-group">
+          ${renderColorChips('set-colorHighlightText')}
+          <input type="color" id="set-colorHighlightText" class="custom-color-input" value="${settings.colorHighlightText || '#ffa657'}" />
+        </div>
+      </div>
+
+      <div class="setting-row" style="margin-top: 8px; padding-top: 14px;">
         <div>
           <div class="setting-label">전체 단어장 백업 및 복원</div>
           <div class="setting-desc">JSON 파일로 모든 단어와 복습 기록을 보관합니다</div>
@@ -902,14 +970,56 @@ function collectCurrentTabInputs(): void {
     settings.autoPlayAudio = getChk('set-autoPlayAudio', false);
     settings.replayQuestionAudio = getChk('set-replayQuestionAudio', false);
   } else if (activeSettingsTab === 'display') {
+    const newTheme = (getVal('set-themeMode') as AnkiSettings['themeMode']) || settings.themeMode;
+    const themeChanged = newTheme !== settings.themeMode;
     settings.viewMode = (getVal('set-viewMode') as AnkiSettings['viewMode']) || settings.viewMode;
-    settings.themeMode = (getVal('set-themeMode') as AnkiSettings['themeMode']) || settings.themeMode;
+    settings.themeMode = newTheme;
+
+    if (themeChanged) {
+      // 다크 <-> 라이트 전환 시 해당 테마에 가장 잘 어울리는 기본 글자색 세트로 자동 맞춤
+      if (newTheme === 'light') {
+        settings.colorBaseText = '#1f2328';
+        settings.colorWordText = '#0f172a';
+        settings.colorMeaningText = '#0969da';
+        settings.colorHighlightText = '#cf222e';
+      } else {
+        settings.colorBaseText = '#e6edf3';
+        settings.colorWordText = '#ffffff';
+        settings.colorMeaningText = '#79c0ff';
+        settings.colorHighlightText = '#ffa657';
+      }
+    } else {
+      settings.colorBaseText = getVal('set-colorBaseText') || settings.colorBaseText;
+      settings.colorWordText = getVal('set-colorWordText') || settings.colorWordText;
+      settings.colorMeaningText = getVal('set-colorMeaningText') || settings.colorMeaningText;
+      settings.colorHighlightText = getVal('set-colorHighlightText') || settings.colorHighlightText;
+    }
   }
   saveSettings(settings);
 }
 
 function attachSettingsModalEvents(): void {
   if (!isSettingsModalOpen) return;
+
+  // GitHub 컬러 프리셋 동그라미 칩 클릭 시 즉시 컬러 피커 값 변경 및 미리보기 반영
+  document.querySelectorAll<HTMLButtonElement>('.gh-color-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const targetId = chip.dataset.target!;
+      const hex = chip.dataset.hex!;
+      const inputEl = document.getElementById(targetId) as HTMLInputElement | null;
+      if (inputEl) {
+        inputEl.value = hex;
+        collectCurrentTabInputs();
+      }
+    });
+  });
+
+  // 컬러 피커 직접 조작 시 실시간 반영
+  document.querySelectorAll<HTMLInputElement>('.custom-color-input').forEach(input => {
+    input.addEventListener('input', () => {
+      collectCurrentTabInputs();
+    });
+  });
 
   document.querySelectorAll<HTMLButtonElement>('.pro-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {

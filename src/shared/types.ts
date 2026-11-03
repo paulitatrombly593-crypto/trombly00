@@ -36,9 +36,13 @@ export interface AnkiSettings {
   autoPlayAudio: boolean;       // 자동으로 오디오(TTS) 재생
   replayQuestionAudio: boolean; // 정답 확인 시 질문 오디오도 함께 재생
 
-  // 5. [화면 레이아웃] 설정
+  // 5. [화면 레이아웃 및 섹터별 글자색] 설정
   viewMode: 'pc' | 'mobile';
   themeMode: 'dark' | 'light';
+  colorBaseText: string;      // 섹터 1: 기본 UI 글자색 (홈, 설정 등)
+  colorWordText: string;      // 섹터 2: 학습 시 단어(앞면) 글자색
+  colorMeaningText: string;   // 섹터 3: 학습 시 뜻(뒷면) 글자색
+  colorHighlightText: string; // 섹터 4: **강조** 포인트 글자색
 }
 
 /**

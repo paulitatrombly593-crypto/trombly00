@@ -40,9 +40,13 @@ export const DEFAULT_ANKI_SETTINGS: AnkiSettings = {
   autoPlayAudio: false,
   replayQuestionAudio: false,
 
-  // 5. 화면 설정
+  // 5. 화면 및 GitHub Dark+ 섹터별 기본 글자색 설정
   viewMode: typeof window !== 'undefined' && window.innerWidth <= 640 ? 'mobile' : 'pc',
-  themeMode: 'dark'
+  themeMode: 'dark',
+  colorBaseText: '#e6edf3',      // GitHub Dark+ 기본 텍스트 (은은한 화이트)
+  colorWordText: '#ffffff',      // 학습 단어 (선명한 화이트)
+  colorMeaningText: '#79c0ff',   // 학습 뜻 (GitHub 시그니처 스카이 블루)
+  colorHighlightText: '#ffa657'  // **강조** (GitHub 신택스 오렌지)
 };
 
 export class SM2Scheduler {

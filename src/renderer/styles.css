@@ -1178,3 +1178,77 @@ body.theme-dark .level-lv3 {
   background: rgba(52, 211, 153, 0.18);
   color: #6ee7b7;
 }
+
+/* =========================================================
+   🐙 GitHub Dark+ 공식 테마 & 4대 섹터별 커스텀 글자색 시스템
+   ========================================================= */
+:root {
+  --sector-base-color: #1f2328;
+  --sector-word-color: #0f172a;
+  --sector-meaning-color: #0969da;
+  --sector-highlight-color: #cf222e;
+}
+
+/* GitHub Dark+ (Dark Default) 공식 배경·카드·보더 세팅 */
+body.theme-dark {
+  --bg-main: #0d1117 !important;       /* GitHub Dark 캔버스 배경 */
+  --bg-card: #161b22 !important;       /* GitHub Dark 서브 컨테이너/카드 */
+  --text-primary: var(--sector-base-color, #e6edf3) !important;
+  --text-secondary: #8b949e !important; /* GitHub Muted 그레이 */
+  --border-color: #30363d !important;  /* GitHub Dark 정교한 테두리 */
+  --accent-blue: #2f81f7 !important;   /* GitHub 공식 블루 */
+  --progress-bg: #21262d !important;
+}
+
+/* 섹터 1: 기본 UI 글자색 */
+body {
+  color: var(--sector-base-color) !important;
+}
+
+/* 섹터 2: 학습 시 단어(앞면 질문) 글자색 */
+.study-question {
+  color: var(--sector-word-color) !important;
+}
+
+/* 섹터 3: 학습 시 뜻(뒷면 정답) 글자색 */
+.study-answer {
+  color: var(--sector-meaning-color) !important;
+}
+
+/* 섹터 4: **강조** 포인트 글자색 */
+.text-highlight {
+  color: var(--sector-highlight-color) !important;
+  background: color-mix(in srgb, var(--sector-highlight-color) 15%, transparent) !important;
+}
+
+/* 설정창 내 GitHub 컬러 프리셋 칩 + 컬러 피커 컨트롤 */
+.color-picker-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gh-color-chip {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0 !important;
+  transition: transform 0.15s ease;
+}
+
+.gh-color-chip:hover {
+  transform: scale(1.18);
+  border-color: #ffffff;
+}
+
+.custom-color-input {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
