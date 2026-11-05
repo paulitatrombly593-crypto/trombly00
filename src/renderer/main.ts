@@ -856,7 +856,35 @@ function renderSettingsModalHtml(): string {
     `;
   } else if (activeSettingsTab === 'review') {
     rightPanelHtml = `
-      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🔄 복습 스케줄링 옵션</h4>
+      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🚀 차세대 FSRS 엔진 &amp; 복습 스케줄링 옵션</h4>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">🧠 망각곡선 스케줄러 엔진 선택</div>
+          <div class="setting-desc">FSRS (학습량 20~30% 절감·수월함 지옥 제거) vs 고전 SM-2</div>
+        </div>
+        <select id="set-schedulerEngine" class="setting-select">
+          <option value="fsrs" ${(settings.schedulerEngine ?? 'fsrs') === 'fsrs' ? 'selected' : ''}>🚀 FSRS 차세대 엔진 (권장)</option>
+          <option value="sm2" ${settings.schedulerEngine === 'sm2' ? 'selected' : ''}>⚙️ 고전 SM-2 엔진 (1987)</option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">☑️ 기존 SM-2 학습 진도 이어받기</div>
+          <div class="setting-desc">체크 시 기존 카드의 복습 간격과 난이도를 FSRS 안정성(S)·난이도(D)로 자동 변환합니다</div>
+        </div>
+        <input type="checkbox" id="set-fsrsInheritProgress" ${(settings.fsrsInheritProgress ?? true) ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer;" />
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">🎯 FSRS 목표 기억 유지율 (Desired Retention %)</div>
+          <div class="setting-desc">기억 확률이 이 수치로 떨어지는 날 복습 배치 (국밥 기본: 90%, 안전 범위: 70~97%)</div>
+        </div>
+        <input type="number" id="set-desiredRetention" class="setting-input" min="70" max="97" value="${settings.desiredRetention ?? 90}" />
+      </div>
+
       <div class="setting-row">
         <div>
           <div class="setting-label">최대 복습량 / 일 (일일 복습 목표)</div>
@@ -1119,6 +1147,9 @@ function collectCurrentTabInputs(): void {
     settings.easyInterval = getNum('set-easyInterval', 4);
     settings.startingEase = getNum('set-startingEase', 250);
   } else if (activeSettingsTab === 'review') {
+    settings.schedulerEngine = (getVal('set-schedulerEngine') as AnkiSettings['schedulerEngine']) || 'fsrs';
+    settings.fsrsInheritProgress = getChk('set-fsrsInheritProgress', true);
+    settings.desiredRetention = Math.min(97, Math.max(70, getNum('set-desiredRetention', 90)));
     settings.maxReviewsPerDay = getNum('set-maxReviewsPerDay', 9999);
     settings.easyBonus = getNum('set-easyBonus', 130);
     settings.intervalModifier = getNum('set-intervalModifier', 100);

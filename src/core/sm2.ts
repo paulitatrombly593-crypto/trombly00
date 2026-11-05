@@ -1,4 +1,5 @@
 import { Card, ReviewRating, ReviewLog, AnkiSettings } from '../shared/types';
+import { FSRSScheduler } from './fsrs';
 
 export interface ScheduleResult {
   updatedCard: Card;
@@ -7,9 +8,14 @@ export interface ScheduleResult {
 }
 
 /**
- * 인터넷 커뮤니티 및 정통 Anki 사용자들이 가장 추천하는 '국밥 기본 세팅'
+ * 인터넷 커뮤니티 및 정통 Anki 사용자들이 가장 추천하는 '국밥 기본 세팅' (FSRS 기본 탑재)
  */
 export const DEFAULT_ANKI_SETTINGS: AnkiSettings = {
+  // 🚀 FSRS 차세대 엔진 기본 세팅
+  schedulerEngine: 'fsrs',
+  desiredRetention: 90,
+  fsrsInheritProgress: true,
+
   // 1. 새 카드 탭
   learningSteps: '2 10',
   newCardOrder: 'sequential',
@@ -74,6 +80,11 @@ export class SM2Scheduler {
     settings: AnkiSettings = DEFAULT_ANKI_SETTINGS,
     durationSeconds?: number
   ): ScheduleResult {
+    // 🚀 FSRS 엔진이 선택된 경우(기본값) 차세대 DSR 확률 모델로 즉시 계산!
+    if ((settings?.schedulerEngine ?? 'fsrs') === 'fsrs') {
+      return FSRSScheduler.calculate(card, rating, now, settings, durationSeconds);
+    }
+
     const learnSteps = this.parseSteps(settings.learningSteps, [2, 10]);
     const relearnSteps = this.parseSteps(settings.relearningSteps, [10]);
 
