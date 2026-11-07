@@ -2406,19 +2406,15 @@ async function renderStudyRoom(): Promise<void> {
         <button id="btn-speak-card" class="card-speaker-btn" title="발음 듣기">🔊</button>
       </div>
 
-      <div class="study-footer-bar">
-        <button type="button" id="btn-edit-current-card" class="glass-pill-btn side-glass-btn" title="현재 카드 즉시 수정">
-          ✏️ Edit
-        </button>
-
+      <div class="study-footer-bar" style="justify-content: center;">
         ${!isAnswerRevealed ? `
-          <div class="calm-bottom-bar" style="flex: 1;">
+          <div class="calm-bottom-bar" style="width: 100%;">
             <button id="btn-reveal" class="glass-pill-btn glass-reveal-btn">
               정답 확인 ${settings.viewMode === 'pc' ? '(Space)' : ''}
             </button>
           </div>
         ` : isStarCramMode ? `
-          <div class="calm-bottom-bar" style="flex: 1;">
+          <div class="calm-bottom-bar" style="width: 100%;">
             <div class="glass-btn-wrap">
               <span class="due-above-label">세션 끝 재출제</span>
               <button id="btn-cram-retry" class="glass-pill-btn">🔄 다시 보기</button>
@@ -2429,14 +2425,10 @@ async function renderStudyRoom(): Promise<void> {
             </div>
           </div>
         ` : `
-          <div class="calm-bottom-bar" style="flex: 1;">
+          <div class="calm-bottom-bar" style="width: 100%;">
             ${ratingButtonsHtml}
           </div>
         `}
-
-        <button type="button" id="btn-undo-bottom" class="glass-pill-btn side-glass-btn" ${undoHistoryStack.length === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} title="직전 카드 되돌리기 (Ctrl+Z)">
-          ↩️ Undo
-        </button>
       </div>
     </div>
     ${renderSettingsModalHtml()}
