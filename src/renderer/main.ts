@@ -916,7 +916,7 @@ function renderSettingsModalHtml(): string {
             <div class="setting-desc">권장 90% (85%~95% 조절 가능, 높을수록 자주 복습)</div>
           </div>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="set-desiredRetention" class="setting-input" min="70" max="97" step="1" value="${Math.round((settings.desiredRetention || 0.9) * 100)}" ${!isFsrs ? 'disabled' : ''} style="width: 72px;" />
+            <input type="number" id="set-desiredRetention" class="setting-input" min="70" max="97" step="1" value="${Math.round((settings.desiredRetention && settings.desiredRetention > 1 ? settings.desiredRetention / 100 : (settings.desiredRetention || 0.9)) * 100)}" ${!isFsrs ? 'disabled' : ''} style="width: 72px;" />
             <span style="font-size: 13px; font-weight: 700;">%</span>
           </div>
         </div>
@@ -1189,8 +1189,10 @@ function collectCurrentTabInputs(): void {
     const selectedEngine = (getVal('set-schedulerEngine') as 'fsrs' | 'sm2') || settings.schedulerEngine;
     settings.schedulerEngine = selectedEngine;
     if (selectedEngine === 'fsrs') {
-      const retentionPct = getNum('set-desiredRetention', 90);
-      settings.desiredRetention = Math.min(0.97, Math.max(0.70, retentionPct / 100));
+      let retentionVal = getNum('set-desiredRetention', 90);
+      if (retentionVal > 100) retentionVal = 90; // 9000 같은 비정상 수치 자동 리셋
+      const retentionRatio = retentionVal > 1 ? retentionVal / 100 : retentionVal;
+      settings.desiredRetention = Math.min(0.97, Math.max(0.70, retentionRatio));
       settings.fsrsInheritProgress = getChk('set-fsrsInheritProgress', true);
     } else {
       settings.easyBonus = getNum('set-easyBonus', 130);
