@@ -82,8 +82,8 @@ export class SM2Scheduler {
     settings: AnkiSettings = DEFAULT_ANKI_SETTINGS,
     durationSeconds?: number
   ): ScheduleResult {
-    // 🚀 FSRS 엔진이 선택된 경우(기본값) 차세대 DSR 확률 모델로 즉시 계산!
-    if ((settings?.schedulerEngine ?? 'fsrs') === 'fsrs') {
+    // 🚀 설정된 엔진이 FSRS-5이면 순수 FSRS-5 엔진으로 분리 계산!
+    if (settings.schedulerEngine === 'fsrs') {
       return FSRSScheduler.calculate(card, rating, now, settings, durationSeconds);
     }
 

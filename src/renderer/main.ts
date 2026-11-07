@@ -2378,8 +2378,11 @@ async function renderStudyRoom(): Promise<void> {
             <button id="btn-undo-card" class="icon-circle-btn" title="방금 카드 되돌리기 (Ctrl+Z)" style="font-size: 15px;">↩️</button>
           ` : ''}
         </div>
-        <div class="study-counter">
-          ${isStarCramMode ? '⭐ 자유 복습 ' : ''}${currentCardIndex + 1} / ${studyQueue.length}
+        <div class="study-counter" style="display: flex; align-items: center; justify-content: center; gap: 6px;">
+          <span>${isStarCramMode ? '⭐ 자유 복습 ' : ''}${currentCardIndex + 1} / ${studyQueue.length}</span>
+          <span style="padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; background: ${settings.schedulerEngine === 'fsrs' ? 'rgba(56, 189, 248, 0.16)' : 'rgba(148, 163, 184, 0.18)'}; color: ${settings.schedulerEngine === 'fsrs' ? '#38bdf8' : 'var(--text-secondary)'};">
+            ${settings.schedulerEngine === 'fsrs' ? `🚀 FSRS ${Math.round((settings.desiredRetention && settings.desiredRetention > 1 ? settings.desiredRetention / 100 : (settings.desiredRetention || 0.9)) * 100)}%` : '⚙️ SM-2'}
+          </span>
         </div>
         <div style="min-width: 55px; text-align: right; font-size: 13px; color: var(--text-secondary);" id="study-timer-display">
           ${settings.showTimer ? '⏱️ 0s' : ''}
