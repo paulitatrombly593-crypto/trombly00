@@ -1990,13 +1990,30 @@ async function renderDeckManage(deckId: string): Promise<void> {
     try {
       const text = await readFileWithAutoEncoding(file);
       const parseResult = CsvParser.parse(text);
-      if (parseResult.validCards.length === 0) return alert('유효한 단어가 없습니다.');
-      if (!confirm(`총 ${parseResult.validCards.length}개의 단어를 등록하시겠습니까?`)) return;
+
+      // 1행에 Q, A, E가 선언되지 않은 경우 즉시 안내 후 차단
+      if (parseResult.headerError) {
+        alert(`⚠️ CSV 양식 오류\n\n${parseResult.headerError}`);
+        return;
+      }
+
+      if (parseResult.validCards.length === 0) {
+        const errDetail = parseResult.errors.length > 0 ? `\n\n[제외 내역]\n${parseResult.errors.slice(0, 5).join('\n')}` : '';
+        alert(`등록할 수 있는 유효한 단어가 없습니다.${errDetail}`);
+        return;
+      }
+
+      const skipNotice =
+        parseResult.skippedCount > 0
+          ? `\n(⚠️ Q 또는 A가 비어있는 오류 행 ${parseResult.skippedCount}개는 자동 삭제되었습니다.)`
+          : '';
+
+      if (!confirm(`총 ${parseResult.validCards.length}개의 단어를 등록하시겠습니까?${skipNotice}`)) return;
 
       for (const item of parseResult.validCards) {
         await api.addCard(deck.id, item.front, item.back, settings.startingEase, item.example);
       }
-      alert(`🎉 ${parseResult.validCards.length}개의 단어가 등록되었습니다!`);
+      alert(`🎉 ${parseResult.validCards.length}개의 단어가 성공적으로 등록되었습니다!${skipNotice}`);
       await render();
     } catch (err) {
       alert(`CSV 오류: ${(err as Error).message}`);
@@ -2863,28 +2880,31 @@ function escapeHtml(text: string): string {
 /**
  * **강조**, {{빈칸}}, 그리고 예문 속 타겟 단어(targetWord) 자동 하이라이트를 처리하는 스마트 포매터
  */
-function formatRichText(text: string, revealCloze = true, targetWord?: string): string {
+function formatRichText(text: string, revealCloze = true, highlightTargetWord?: string): string {
   let formatted = escapeHtml(text);
 
-  // 1. **강조** -> 섹터 4 포인트 색상 하이라이트
-  formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong class="text-highlight">$1</strong>');
+  // 1. **강조** -> 멀티라인 포함 강조 하이라이트
+  formatted = formatted.replace(/\*\*([\s\S]+?)\*\*/g, '<strong class="text-highlight">$1</strong>');
 
-  // 2. {{빈칸}} -> 앞면에서는 [ ... ], 뒷면에서는 초록색 정답 하이라이트
-  formatted = formatted.replace(/\{\{(.+?)\}\}/g, (_, answer) => {
+  // 2. {{빈칸}} -> 앞면에서는 [ ... ], 뒷면 및 목록에서는 정답 하이라이트
+  formatted = formatted.replace(/\{\{([\s\S]+?)\}\}/g, (_, answer) => {
     return revealCloze
       ? `<span class="cloze-revealed">${answer}</span>`
       : `<span class="cloze-blank">[ &nbsp;...&nbsp; ]</span>`;
   });
 
-  // 3. 예문 내 타겟 단어(앞면 단어) 자동 감지 하이라이트
-  if (targetWord) {
-    const cleanTarget = targetWord.replace(/\*\*/g, '').replace(/\{\{|\}\}/g, '').trim();
-    if (cleanTarget.length >= 2 && !formatted.includes('text-highlight')) {
+  // 3. 예문 내 타겟 영단어 자동 강조
+  if (highlightTargetWord) {
+    const cleanTarget = highlightTargetWord.replace(/\*\*/g, '').replace(/\{\{|\}\}/g, '').trim();
+    if (cleanTarget.length >= 2 && /^[a-zA-Z\s-]+$/.test(cleanTarget)) {
       const escapedTarget = cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(${escapedTarget})`, 'gi');
+      const regex = new RegExp(`\\b(${escapedTarget}[a-zA-Z]*)\\b`, 'gi');
       formatted = formatted.replace(regex, '<strong class="text-highlight">$1</strong>');
     }
   }
+
+  // 4. 엑셀 셀 내부 줄바꿈(Alt+Enter)을 실제 화면 줄바꿈(<br/>)으로 변환
+  formatted = formatted.replace(/\n/g, '<br/>');
 
   return formatted;
 }
