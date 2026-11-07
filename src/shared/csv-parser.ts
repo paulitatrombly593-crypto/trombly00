@@ -50,21 +50,22 @@ export class CsvParser {
       };
     }
 
-    // 3. 첫 번째 행(1행) 대문자 Q, A, E 필수 선언 검증
-    const headerRow = rows[0].columns.map(col => col.trim());
+    // 3. 첫 번째 행(1행) T, D, P 선언 검증 (대소문자 무관)
+    const headerRow = rows[0].columns.map(col => col.trim().toUpperCase());
     const isValidHeader =
       headerRow.length >= 3 &&
-      headerRow[0] === 'Q' &&
-      headerRow[1] === 'A' &&
-      headerRow[2] === 'E';
+      headerRow[0] === 'T' &&
+      headerRow[1] === 'D' &&
+      headerRow[2] === 'P';
 
     if (!isValidHeader) {
+      const detected = rows[0].columns.map(col => col.trim()).slice(0, 3).join(', ');
       const headerErrorMsg =
-        '엑셀(CSV) 첫 번째 줄(1행)의 1~3열은 반드시 대문자 Q, A, E 순서로 선언되어야 합니다.\n\n' +
-        '• A1칸: Q (단어/문제 - 필수)\n' +
-        '• B1칸: A (뜻/정답 - 필수)\n' +
-        '• C1칸: E (예문/보충설명 - 선택)\n\n' +
-        `현재 감지된 1행: [${headerRow.slice(0, 3).join(', ') || '비어 있음'}]`;
+        '엑셀(CSV) 첫 번째 줄(1행)의 1~3열은 반드시 T, D, P 순서로 선언되어야 합니다.\n\n' +
+        '• A1칸: T (단어 - 필수)\n' +
+        '• B1칸: D (뜻 - 필수)\n' +
+        '• C1칸: P (예문 - 선택)\n\n' +
+        `현재 감지된 1행: [${detected || '비어 있음'}]`;
       return {
         validCards: [],
         skippedCount: rows.length,
@@ -73,13 +74,13 @@ export class CsvParser {
       };
     }
 
-    // 4. 2행부터 데이터 검증 (Q, A 필수 / E 선택)
+    // 4. 2행부터 데이터 검증 (T, D 필수 / P 선택)
     for (let i = 1; i < rows.length; i++) {
       const { columns, rowNumber } = rows[i];
 
-      const qText = (columns[0] ?? '').trim();
-      const aText = (columns[1] ?? '').trim();
-      const eText = (columns[2] ?? '').trim();
+      const tText = (columns[0] ?? '').trim();
+      const dText = (columns[1] ?? '').trim();
+      const pText = (columns[2] ?? '').trim();
 
       // 모든 열이 완전히 비어있는 공백 행(엑셀 하단 빈 줄)은 조용히 건너뜀
       const isCompletelyEmpty = columns.every(col => col.trim() === '');
@@ -87,18 +88,18 @@ export class CsvParser {
         continue;
       }
 
-      // Q(단어) 또는 A(뜻) 중 하나라도 비어 있으면 오류 행으로 간주하고 업로드에서 삭제(제외)
-      if (!qText || !aText) {
+      // T(단어) 또는 D(뜻) 중 하나라도 비어 있으면 오류 행으로 간주하고 업로드에서 삭제(제외)
+      if (!tText || !dText) {
         skippedCount++;
-        const preview = qText || aText || eText || '빈 행';
-        errors.push(`[${rowNumber}행 삭제됨] Q 또는 A 칸이 비어 있어 제외됨 ("${preview.slice(0, 20)}")`);
+        const preview = tText || dText || pText || '빈 행';
+        errors.push(`[${rowNumber}행 삭제됨] T(단어) 또는 D(뜻) 칸이 비어 있어 제외됨 ("${preview.slice(0, 20)}")`);
         continue;
       }
 
       validCards.push({
-        front: qText,
-        back: aText,
-        example: eText ? eText : undefined,
+        front: tText,
+        back: dText,
+        example: pText ? pText : undefined,
         lineNumber: rowNumber
       });
     }
