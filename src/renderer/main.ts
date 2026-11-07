@@ -85,19 +85,40 @@ function saveSettings(newSettings: AnkiSettings): void {
   applyDisplayClasses();
 }
 
+const DARK_DEFAULT_COLORS = {
+  colorOuterBg: '#252526',
+  colorCardBg: '#1e1e1e',
+  colorBaseText: '#d4d4d4',
+  colorWordText: '#9cdcfe',
+  colorMeaningText: '#4fc1ff',
+  colorHighlightText: '#dcdcaa',
+};
+
+const LIGHT_DEFAULT_COLORS = {
+  colorOuterBg: '#f3f4f6',
+  colorCardBg: '#ffffff',
+  colorBaseText: '#1e293b',
+  colorWordText: '#0f172a',
+  colorMeaningText: '#2563eb',
+  colorHighlightText: '#d97706',
+};
+
+function getDefaultColorsForTheme(theme: 'dark' | 'light') {
+  return theme === 'light' ? { ...LIGHT_DEFAULT_COLORS } : { ...DARK_DEFAULT_COLORS };
+}
+
 function applyDisplayClasses(): void {
   document.body.classList.remove('mode-pc', 'mode-mobile', 'theme-dark', 'theme-light');
   document.body.classList.add(`mode-${settings.viewMode}`, `theme-${settings.themeMode}`);
 
+  const defaults = getDefaultColorsForTheme(settings.themeMode);
   const root = document.documentElement;
-  const defaultOuter = settings.themeMode === 'light' ? '#e5e7eb' : '#252526';
-  const defaultCard = settings.themeMode === 'light' ? '#ffffff' : '#1e1e1e';
-  root.style.setProperty('--custom-outer-bg', settings.colorOuterBg || defaultOuter);
-  root.style.setProperty('--custom-card-bg', settings.colorCardBg || defaultCard);
-  root.style.setProperty('--sector-base-color', settings.colorBaseText || '#d4d4d4');
-  root.style.setProperty('--sector-word-color', settings.colorWordText || '#ffffff');
-  root.style.setProperty('--sector-meaning-color', settings.colorMeaningText || '#9cdcfe');
-  root.style.setProperty('--sector-highlight-color', settings.colorHighlightText || '#ce9178');
+  root.style.setProperty('--bg-main', settings.colorOuterBg || defaults.colorOuterBg);
+  root.style.setProperty('--bg-card', settings.colorCardBg || defaults.colorCardBg);
+  root.style.setProperty('--text-primary', settings.colorBaseText || defaults.colorBaseText);
+  root.style.setProperty('--word-text-color', settings.colorWordText || defaults.colorWordText);
+  root.style.setProperty('--meaning-text-color', settings.colorMeaningText || defaults.colorMeaningText);
+  root.style.setProperty('--highlight-text-color', settings.colorHighlightText || defaults.colorHighlightText);
 }
 
 applyDisplayClasses();
@@ -807,18 +828,28 @@ async function renderStarredPage(): Promise<void> {
 function renderSettingsModalHtml(): string {
   if (!isSettingsModalOpen) return '';
 
+  const isFsrs = settings.schedulerEngine === 'fsrs';
+  const sm2DisabledClass = isFsrs ? 'setting-row-disabled' : '';
+  const sm2DisabledAttr = isFsrs ? 'disabled' : '';
+  const sm2Badge = isFsrs ? '<span class="sm2-only-badge">SM-2 전용</span>' : '';
+  const fsrsLockNotice = isFsrs
+    ? `<div class="fsrs-lock-banner">🤖 <b>FSRS-5 엔진 사용 중:</b> FSRS가 기억 안정성(S)과 난이도(D)를 자동 계산하므로, SM-2 전용 수동 가중치 항목은 자동으로 비활성화되었습니다.</div>`
+    : '';
+
+  const themeDefaults = getDefaultColorsForTheme(settings.themeMode);
+  const curOuterBg = settings.colorOuterBg || themeDefaults.colorOuterBg;
+  const curCardBg = settings.colorCardBg || themeDefaults.colorCardBg;
+  const curBaseText = settings.colorBaseText || themeDefaults.colorBaseText;
+  const curWordText = settings.colorWordText || themeDefaults.colorWordText;
+  const curMeaningText = settings.colorMeaningText || themeDefaults.colorMeaningText;
+  const curHighlightText = settings.colorHighlightText || themeDefaults.colorHighlightText;
+
   let rightPanelHtml = '';
 
   if (activeSettingsTab === 'new') {
     rightPanelHtml = `
       <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🌱 새 카드 학습 옵션</h4>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">익힘 단계 (분 단위)</div>
-          <div class="setting-desc">띄어쓰기로 구분 (국밥 기본: 2 10)</div>
-        </div>
-        <input type="text" id="set-learningSteps" class="setting-input" value="${escapeHtml(settings.learningSteps)}" />
-      </div>
+      ${fsrsLockNotice}
       <div class="setting-row">
         <div>
           <div class="setting-label">새 카드 출제 순서</div>
@@ -832,127 +863,116 @@ function renderSettingsModalHtml(): string {
       <div class="setting-row">
         <div>
           <div class="setting-label">새 카드 / 일 (일일 학습 목표)</div>
-          <div class="setting-desc">하루에 새로 외울 최대 단어 수</div>
+          <div class="setting-desc">하루에 새로 외울 최대 단어 수 (기본: 20)</div>
         </div>
         <input type="number" id="set-newCardsPerDay" class="setting-input" min="0" max="9999" value="${settings.newCardsPerDay}" />
       </div>
-      <div class="setting-row">
+      <div class="setting-row ${sm2DisabledClass}">
         <div>
-          <div class="setting-label">졸업 간격 (일)</div>
-          <div class="setting-desc">익힘 단계를 모두 통과한 후 첫 복습일</div>
+          <div class="setting-label">익힘 단계 (분 단위) ${sm2Badge}</div>
+          <div class="setting-desc">띄어쓰기로 구분 (기본: 2 10)</div>
         </div>
-        <input type="number" id="set-graduatingInterval" class="setting-input" min="1" max="365" value="${settings.graduatingInterval}" />
+        <input type="text" id="set-learningSteps" class="setting-input" value="${escapeHtml(settings.learningSteps)}" ${sm2DisabledAttr} />
       </div>
-      <div class="setting-row">
+      <div class="setting-row ${sm2DisabledClass}">
         <div>
-          <div class="setting-label">쉬움(Easy) 즉시 복습 주기 (일)</div>
-          <div class="setting-desc">새 카드에서 '쉬움' 선택 시 부여할 간격</div>
+          <div class="setting-label">졸업 간격 (일) ${sm2Badge}</div>
+          <div class="setting-desc">익힘 단계를 모두 통과한 후 첫 복습일 (기본: 1일)</div>
         </div>
-        <input type="number" id="set-easyInterval" class="setting-input" min="1" max="365" value="${settings.easyInterval}" />
+        <input type="number" id="set-graduatingInterval" class="setting-input" min="1" max="365" value="${settings.graduatingInterval}" ${sm2DisabledAttr} />
       </div>
-      <div class="setting-row">
+      <div class="setting-row ${sm2DisabledClass}">
         <div>
-          <div class="setting-label">초기 수월함 (%)</div>
-          <div class="setting-desc">기본 난이도 가중치 (국밥: 250%)</div>
+          <div class="setting-label">쉬움(Easy) 즉시 복습 주기 (일) ${sm2Badge}</div>
+          <div class="setting-desc">새 카드에서 '쉬움' 선택 시 부여할 간격 (기본: 4일)</div>
         </div>
-        <input type="number" id="set-startingEase" class="setting-input" min="130" max="500" value="${settings.startingEase}" />
+        <input type="number" id="set-easyInterval" class="setting-input" min="1" max="365" value="${settings.easyInterval}" ${sm2DisabledAttr} />
+      </div>
+      <div class="setting-row ${sm2DisabledClass}">
+        <div>
+          <div class="setting-label">초기 수월함 (%) ${sm2Badge}</div>
+          <div class="setting-desc">기본 난이도 가중치 (기본: 250%)</div>
+        </div>
+        <input type="number" id="set-startingEase" class="setting-input" min="130" max="500" value="${settings.startingEase}" ${sm2DisabledAttr} />
       </div>
     `;
   } else if (activeSettingsTab === 'review') {
     rightPanelHtml = `
-      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🚀 차세대 FSRS 엔진 &amp; 복습 스케줄링 옵션</h4>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">🧠 망각곡선 스케줄러 엔진 선택</div>
-          <div class="setting-desc">FSRS (학습량 20~30% 절감·수월함 지옥 제거) vs 고전 SM-2</div>
+      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🔄 복습 스케줄링 옵션</h4>
+      <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 12px; padding: 12px; margin-bottom: 14px;">
+        <div class="setting-row" style="border-bottom: none; padding: 4px 0;">
+          <div>
+            <div class="setting-label" style="color: var(--accent-blue);">🧠 학습 스케줄러 알고리즘 엔진</div>
+            <div class="setting-desc">차세대 FSRS-5 (DSR 기억 모델) vs 클래식 SM-2</div>
+          </div>
+          <select id="set-schedulerEngine" class="setting-select">
+            <option value="fsrs" ${settings.schedulerEngine === 'fsrs' ? 'selected' : ''}>🚀 FSRS-5 (권장)</option>
+            <option value="sm2" ${settings.schedulerEngine === 'sm2' ? 'selected' : ''}>⚙️ 클래식 SM-2</option>
+          </select>
         </div>
-        <select id="set-schedulerEngine" class="setting-select">
-          <option value="fsrs" ${(settings.schedulerEngine ?? 'fsrs') === 'fsrs' ? 'selected' : ''}>🚀 FSRS 차세대 엔진 (권장)</option>
-          <option value="sm2" ${settings.schedulerEngine === 'sm2' ? 'selected' : ''}>⚙️ 고전 SM-2 엔진 (1987)</option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">☑️ 기존 SM-2 학습 진도 이어받기</div>
-          <div class="setting-desc">체크 시 기존 카드의 복습 간격과 난이도를 FSRS 안정성(S)·난이도(D)로 자동 변환합니다</div>
+        <div class="setting-row ${!isFsrs ? 'setting-row-disabled' : ''}" style="border-bottom: none; padding: 8px 0 4px 0;">
+          <div>
+            <div class="setting-label">🎯 FSRS 목표 암기 유지율 (Desired Retention)</div>
+            <div class="setting-desc">권장 90% (85%~95% 조절 가능, 높을수록 자주 복습)</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <input type="number" id="set-desiredRetention" class="setting-input" min="70" max="97" step="1" value="${Math.round((settings.desiredRetention || 0.9) * 100)}" ${!isFsrs ? 'disabled' : ''} style="width: 72px;" />
+            <span style="font-size: 13px; font-weight: 700;">%</span>
+          </div>
         </div>
-        <input type="checkbox" id="set-fsrsInheritProgress" ${(settings.fsrsInheritProgress ?? true) ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer;" />
-      </div>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">🎯 FSRS 목표 기억 유지율 (Desired Retention %)</div>
-          <div class="setting-desc">기억 확률이 이 수치로 떨어지는 날 복습 배치 (국밥 기본: 90%, 안전 범위: 70~97%)</div>
+        <div class="setting-row ${!isFsrs ? 'setting-row-disabled' : ''}" style="border-bottom: none; padding: 6px 0 2px 0;">
+          <div>
+            <div class="setting-label">🔄 기존 SM-2 학습 진도 이어받기</div>
+            <div class="setting-desc">체크 시 기존 카드의 간격·난이도를 FSRS 초기값으로 변환</div>
+          </div>
+          <input type="checkbox" id="set-fsrsInheritProgress" ${settings.fsrsInheritProgress !== false ? 'checked' : ''} ${!isFsrs ? 'disabled' : ''} style="width: 18px; height: 18px;" />
         </div>
-        <input type="number" id="set-desiredRetention" class="setting-input" min="70" max="97" value="${settings.desiredRetention ?? 90}" />
       </div>
-
+      ${fsrsLockNotice}
       <div class="setting-row">
         <div>
           <div class="setting-label">최대 복습량 / 일 (일일 복습 목표)</div>
-          <div class="setting-desc">하루 최대 복습 카드 수 (국밥: 9999)</div>
+          <div class="setting-desc">하루 최대 복습 카드 수 (기본: 9999)</div>
         </div>
         <input type="number" id="set-maxReviewsPerDay" class="setting-input" min="1" max="9999" value="${settings.maxReviewsPerDay}" />
       </div>
       <div class="setting-row">
         <div>
-          <div class="setting-label">쉬움 버튼 보너스 (%)</div>
-          <div class="setting-desc">쉬움 선택 시 추가 배율 (국밥: 130%)</div>
-        </div>
-        <input type="number" id="set-easyBonus" class="setting-input" min="100" max="300" value="${settings.easyBonus}" />
-      </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">복습 주기 조정값 (%)</div>
-          <div class="setting-desc">전체 복습 간격에 곱할 배율 (기본: 100%)</div>
-        </div>
-        <input type="number" id="set-intervalModifier" class="setting-input" min="50" max="250" value="${settings.intervalModifier}" />
-      </div>
-      <div class="setting-row">
-        <div>
           <div class="setting-label">최대 복습 주기 (일)</div>
-          <div class="setting-desc">복습 간격 상한선 (시험 대비: 30~180일)</div>
+          <div class="setting-desc">복습 간격 상한선 (기본: 180일)</div>
         </div>
         <input type="number" id="set-maxInterval" class="setting-input" min="7" max="36500" value="${settings.maxInterval}" />
       </div>
-      <div class="setting-row">
+      <div class="setting-row ${sm2DisabledClass}">
         <div>
-          <div class="setting-label">어려움(Hard) 난이도 구간 (%)</div>
+          <div class="setting-label">쉬움 버튼 보너스 (%) ${sm2Badge}</div>
+          <div class="setting-desc">쉬움 선택 시 추가 배율 (기본: 130%)</div>
+        </div>
+        <input type="number" id="set-easyBonus" class="setting-input" min="100" max="300" value="${settings.easyBonus}" ${sm2DisabledAttr} />
+      </div>
+      <div class="setting-row ${sm2DisabledClass}">
+        <div>
+          <div class="setting-label">복습 주기 조정값 (%) ${sm2Badge}</div>
+          <div class="setting-desc">전체 복습 간격에 곱할 배율 (기본: 100%)</div>
+        </div>
+        <input type="number" id="set-intervalModifier" class="setting-input" min="50" max="250" value="${settings.intervalModifier}" ${sm2DisabledAttr} />
+      </div>
+      <div class="setting-row ${sm2DisabledClass}">
+        <div>
+          <div class="setting-label">어려움(Hard) 난이도 구간 (%) ${sm2Badge}</div>
           <div class="setting-desc">어려움 선택 시 간격 증가율 (기본: 120%)</div>
         </div>
-        <input type="number" id="set-hardInterval" class="setting-input" min="100" max="200" value="${settings.hardInterval}" />
+        <input type="number" id="set-hardInterval" class="setting-input" min="100" max="200" value="${settings.hardInterval}" ${sm2DisabledAttr} />
       </div>
     `;
   } else if (activeSettingsTab === 'lapse') {
     rightPanelHtml = `
       <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">⚠️ 실패 (망각 및 거머리) 관리</h4>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">실패 시 익힘 단계 (분 단위)</div>
-          <div class="setting-desc">복습 카드를 틀렸을 때 재학습 단계 (예: 10)</div>
-        </div>
-        <input type="text" id="set-relearningSteps" class="setting-input" value="${escapeHtml(settings.relearningSteps)}" />
-      </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">새 복습 주기 비율 (%)</div>
-          <div class="setting-desc">틀린 후 기존 간격 대비 유지 비율 (기본: 0%)</div>
-        </div>
-        <input type="number" id="set-newIntervalPercent" class="setting-input" min="0" max="100" value="${settings.newIntervalPercent}" />
-      </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">최소 복습 주기 (일)</div>
-          <div class="setting-desc">재학습 졸업 후 최소 보장 일수 (기본: 1일)</div>
-        </div>
-        <input type="number" id="set-minInterval" class="setting-input" min="1" max="30" value="${settings.minInterval}" />
-      </div>
+      ${fsrsLockNotice}
       <div class="setting-row">
         <div>
           <div class="setting-label">거머리(Leech) 기준 실패 횟수</div>
-          <div class="setting-desc">계속 틀리는 단어 감지 기준 (국밥: 8~15회)</div>
+          <div class="setting-desc">계속 틀리는 단어 감지 기준 (기본: 8회)</div>
         </div>
         <input type="number" id="set-leechThreshold" class="setting-input" min="3" max="50" value="${settings.leechThreshold}" />
       </div>
@@ -965,6 +985,27 @@ function renderSettingsModalHtml(): string {
           <option value="tag" ${settings.leechAction === 'tag' ? 'selected' : ''}>태그만 달기</option>
           <option value="suspend" ${settings.leechAction === 'suspend' ? 'selected' : ''}>카드 일시 보류</option>
         </select>
+      </div>
+      <div class="setting-row ${sm2DisabledClass}">
+        <div>
+          <div class="setting-label">실패 시 익힘 단계 (분 단위) ${sm2Badge}</div>
+          <div class="setting-desc">복습 카드를 틀렸을 때 재학습 단계 (기본: 10)</div>
+        </div>
+        <input type="text" id="set-relearningSteps" class="setting-input" value="${escapeHtml(settings.relearningSteps)}" ${sm2DisabledAttr} />
+      </div>
+      <div class="setting-row ${sm2DisabledClass}">
+        <div>
+          <div class="setting-label">새 복습 주기 비율 (%) ${sm2Badge}</div>
+          <div class="setting-desc">틀린 후 기존 간격 대비 유지 비율 (기본: 0%)</div>
+        </div>
+        <input type="number" id="set-newIntervalPercent" class="setting-input" min="0" max="100" value="${settings.newIntervalPercent}" ${sm2DisabledAttr} />
+      </div>
+      <div class="setting-row ${sm2DisabledClass}">
+        <div>
+          <div class="setting-label">최소 복습 주기 (일) ${sm2Badge}</div>
+          <div class="setting-desc">재학습 졸업 후 최소 보장 일수 (기본: 1일)</div>
+        </div>
+        <input type="number" id="set-minInterval" class="setting-input" min="1" max="30" value="${settings.minInterval}" ${sm2DisabledAttr} />
       </div>
     `;
   } else if (activeSettingsTab === 'general') {
@@ -999,117 +1040,79 @@ function renderSettingsModalHtml(): string {
         <input type="checkbox" id="set-replayQuestionAudio" ${settings.replayQuestionAudio ? 'checked' : ''} style="width:20px; height:20px;" />
       </div>
     `;
-  } else {
-    const renderColorChips = (targetInputId: string) => {
-      const ghColors = [
-        { hex: '#d4d4d4', name: 'VS Code Base Gray' },
-        { hex: '#9cdcfe', name: 'VS Code Light Blue' },
-        { hex: '#4ec9b0', name: 'VS Code Mint Green' },
-        { hex: '#ce9178', name: 'VS Code Warm Orange' },
-        { hex: '#c586c0', name: 'VS Code Purple' },
-        { hex: '#dcdcaa', name: 'VS Code Yellow' }
-      ];
-      return ghColors
-        .map(c => `<button type="button" class="gh-color-chip" data-target="${targetInputId}" data-hex="${c.hex}" style="background:${c.hex};" title="${c.name}"></button>`)
-        .join('');
-    };
-
+  } else if (activeSettingsTab === 'display') {
     rightPanelHtml = `
-      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🎨 VS Code Dark+ 테마 &amp; 섹터별 글자색</h4>
+      <h4 style="margin: 0 0 12px 0; color: var(--accent-blue);">🎨 화면 레이아웃 · 색상 커스텀 · 백업</h4>
       <div class="setting-row">
         <div>
-          <div class="setting-label">화면 레이아웃 모드</div>
-          <div class="setting-desc">PC(1-2-3-4 순서) vs 모바일(오른손 엄지 최적화)</div>
+          <div class="setting-label">화면 레이아웃 크기</div>
+          <div class="setting-desc">사용 중인 기기에 맞춰 여백과 버튼 크기 최적화</div>
         </div>
         <select id="set-viewMode" class="setting-select">
-          <option value="mobile" ${settings.viewMode === 'mobile' ? 'selected' : ''}>📱 모바일 모드</option>
-          <option value="pc" ${settings.viewMode === 'pc' ? 'selected' : ''}>💻 PC 모드</option>
+          <option value="pc" ${settings.viewMode === 'pc' ? 'selected' : ''}>🖥️ PC 버전</option>
+          <option value="mobile" ${settings.viewMode === 'mobile' ? 'selected' : ''}>📱 모바일 버전</option>
         </select>
       </div>
       <div class="setting-row">
         <div>
-          <div class="setting-label">배경 테마</div>
-          <div class="setting-desc">VS Code Dark+ (#1e1e1e) vs 라이트 모드</div>
+          <div class="setting-label">배경 테마 모드</div>
+          <div class="setting-desc">모드 변경 시 해당 모드의 기본 색상 팔레트가 적용됩니다</div>
         </div>
         <select id="set-themeMode" class="setting-select">
-          <option value="dark" ${settings.themeMode === 'dark' ? 'selected' : ''}>💻 VS Code Dark+ 모드</option>
+          <option value="dark" ${settings.themeMode === 'dark' ? 'selected' : ''}>🌙 다크 모드</option>
           <option value="light" ${settings.themeMode === 'light' ? 'selected' : ''}>☀️ 라이트 모드</option>
         </select>
       </div>
 
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">🖼️ 바깥쪽 배경색 (네모 바깥 여백)</div>
-          <div class="setting-desc">눈의 피로를 줄여주는 외곽 회색 톤 (VS Code 기본: #252526)</div>
+      <div style="margin-top: 14px; padding: 12px; border-radius: 12px; background: rgba(128,128,128,0.06); border: 1px solid var(--border-color);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <strong style="font-size: 13px;">🎨 배경 및 섹터별 글자색 지정 (${settings.themeMode === 'dark' ? '다크' : '라이트'} 모드)</strong>
         </div>
-        <div class="color-picker-group">
-          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#252526" style="background:#252526;" title="VS Code 사이드바 그레이 (#252526)"></button>
-          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#2d2d30" style="background:#2d2d30;" title="소프트 웜 그레이 (#2d2d30)"></button>
-          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#333337" style="background:#333337;" title="라이트 차콜 그레이 (#333337)"></button>
-          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#18181b" style="background:#18181b;" title="딥 다크 (#18181b)"></button>
-          <input type="color" id="set-colorOuterBg" class="custom-color-input" value="${settings.colorOuterBg || '#252526'}" />
+        <div class="setting-row" style="padding: 8px 0;">
+          <div>
+            <div class="setting-label">1. 바깥 배경색 (사이드 여백)</div>
+            <div class="setting-desc">카드 바깥쪽 배경 (다크 기본: #252526)</div>
+          </div>
+          <input type="color" id="set-colorOuterBg" value="${curOuterBg}" style="width: 44px; height: 32px; border: none; background: transparent; cursor: pointer;" />
         </div>
-      </div>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">🃏 플래시카드 안쪽 배경색 (네모 내부)</div>
-          <div class="setting-desc">가운데 단어에 집중하게 해주는 깊은 다크 톤 (VS Code 기본: #1e1e1e)</div>
+        <div class="setting-row" style="padding: 8px 0;">
+          <div>
+            <div class="setting-label">2. 플래시카드 · 박스 내부 배경색</div>
+            <div class="setting-desc">집중도를 높이는 중앙 카드 배경 (다크 기본: #1e1e1e)</div>
+          </div>
+          <input type="color" id="set-colorCardBg" value="${curCardBg}" style="width: 44px; height: 32px; border: none; background: transparent; cursor: pointer;" />
         </div>
-        <div class="color-picker-group">
-          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#1e1e1e" style="background:#1e1e1e;" title="VS Code 에디터 다크 (#1e1e1e)"></button>
-          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#141416" style="background:#141416;" title="딥 블랙 (#141416)"></button>
-          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#161b22" style="background:#161b22;" title="GitHub 다크 (#161b22)"></button>
-          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#252526" style="background:#252526;" title="미디엄 다크 (#252526)"></button>
-          <input type="color" id="set-colorCardBg" class="custom-color-input" value="${settings.colorCardBg || '#1e1e1e'}" />
+        <div class="setting-row" style="padding: 8px 0;">
+          <div>
+            <div class="setting-label">3. 기본 UI 글자색</div>
+            <div class="setting-desc">홈 화면, 설정, 일반 안내 텍스트 (다크 기본: #d4d4d4)</div>
+          </div>
+          <input type="color" id="set-colorBaseText" value="${curBaseText}" style="width: 44px; height: 32px; border: none; background: transparent; cursor: pointer;" />
         </div>
-      </div>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">1. 기본 UI 글자색 (홈·설정·목록)</div>
-          <div class="setting-desc">전체 화면 기본 텍스트 색상</div>
+        <div class="setting-row" style="padding: 8px 0;">
+          <div>
+            <div class="setting-label">4. 학습 시 앞면(단어) 글자색</div>
+            <div class="setting-desc">플래시카드 문제 단어 색상 (다크 기본: #9cdcfe)</div>
+          </div>
+          <input type="color" id="set-colorWordText" value="${curWordText}" style="width: 44px; height: 32px; border: none; background: transparent; cursor: pointer;" />
         </div>
-        <div class="color-picker-group">
-          ${renderColorChips('set-colorBaseText')}
-          <input type="color" id="set-colorBaseText" class="custom-color-input" value="${settings.colorBaseText || '#d4d4d4'}" />
+        <div class="setting-row" style="padding: 8px 0;">
+          <div>
+            <div class="setting-label">5. 학습 시 뒷면(뜻) 글자색</div>
+            <div class="setting-desc">정답 확인 시 뜻 텍스트 색상 (다크 기본: #4fc1ff)</div>
+          </div>
+          <input type="color" id="set-colorMeaningText" value="${curMeaningText}" style="width: 44px; height: 32px; border: none; background: transparent; cursor: pointer;" />
         </div>
-      </div>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">2. 학습 시 '단어(앞면)' 글자색</div>
-          <div class="setting-desc">플래시카드 중앙 질문 색상</div>
-        </div>
-        <div class="color-picker-group">
-          ${renderColorChips('set-colorWordText')}
-          <input type="color" id="set-colorWordText" class="custom-color-input" value="${settings.colorWordText || '#ffffff'}" />
+        <div class="setting-row" style="padding: 8px 0; border-bottom: none;">
+          <div>
+            <div class="setting-label">6. 핵심 강조(**강조** · 빈칸) 글자색</div>
+            <div class="setting-desc">예문 타겟 단어 및 강조 구문 색상 (다크 기본: #dcdcaa)</div>
+          </div>
+          <input type="color" id="set-colorHighlightText" value="${curHighlightText}" style="width: 44px; height: 32px; border: none; background: transparent; cursor: pointer;" />
         </div>
       </div>
 
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">3. 학습 시 '뜻(뒷면)' 글자색</div>
-          <div class="setting-desc">정답 확인 시 나타나는 뜻 색상</div>
-        </div>
-        <div class="color-picker-group">
-          ${renderColorChips('set-colorMeaningText')}
-          <input type="color" id="set-colorMeaningText" class="custom-color-input" value="${settings.colorMeaningText || '#9cdcfe'}" />
-        </div>
-      </div>
-
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">4. **강조** 및 예문 타겟 단어 색상</div>
-          <div class="setting-desc">**중요** 표시 및 예문 속 정답 단어 자동 강조색</div>
-        </div>
-        <div class="color-picker-group">
-          ${renderColorChips('set-colorHighlightText')}
-          <input type="color" id="set-colorHighlightText" class="custom-color-input" value="${settings.colorHighlightText || '#ce9178'}" />
-        </div>
-      </div>
-
-      <div class="setting-row" style="margin-top: 8px; padding-top: 14px;">
+      <div class="setting-row" style="margin-top: 12px; padding-top: 16px;">
         <div>
           <div class="setting-label">전체 단어장 백업 및 복원</div>
           <div class="setting-desc">JSON 파일로 모든 단어와 복습 기록을 보관합니다</div>
@@ -1149,7 +1152,7 @@ function renderSettingsModalHtml(): string {
 
         <div class="pro-modal-footer">
           <button id="btn-restore-defaults" class="btn-secondary" style="font-size: 12.5px; padding: 10px 14px;">
-            🔄 국밥 기본값 복원
+            기본값 복원
           </button>
           <button id="btn-save-settings" class="btn-primary" style="font-size: 14px; padding: 10px 22px;">
             확인 및 저장
@@ -1171,63 +1174,54 @@ function collectCurrentTabInputs(): void {
     return el ? el.checked : fallback;
   };
 
+  const isFsrs = settings.schedulerEngine === 'fsrs';
+
   if (activeSettingsTab === 'new') {
-    settings.learningSteps = getVal('set-learningSteps') || '2 10';
     settings.newCardOrder = (getVal('set-newCardOrder') as AnkiSettings['newCardOrder']) || 'sequential';
     settings.newCardsPerDay = getNum('set-newCardsPerDay', 20);
-    settings.graduatingInterval = getNum('set-graduatingInterval', 1);
-    settings.easyInterval = getNum('set-easyInterval', 4);
-    settings.startingEase = getNum('set-startingEase', 250);
+    if (!isFsrs) {
+      settings.learningSteps = getVal('set-learningSteps') || '2 10';
+      settings.graduatingInterval = getNum('set-graduatingInterval', 1);
+      settings.easyInterval = getNum('set-easyInterval', 4);
+      settings.startingEase = getNum('set-startingEase', 250);
+    }
   } else if (activeSettingsTab === 'review') {
-    settings.schedulerEngine = (getVal('set-schedulerEngine') as AnkiSettings['schedulerEngine']) || 'fsrs';
-    settings.fsrsInheritProgress = getChk('set-fsrsInheritProgress', true);
-    settings.desiredRetention = Math.min(97, Math.max(70, getNum('set-desiredRetention', 90)));
+    const selectedEngine = (getVal('set-schedulerEngine') as 'fsrs' | 'sm2') || settings.schedulerEngine;
+    settings.schedulerEngine = selectedEngine;
+    if (selectedEngine === 'fsrs') {
+      const retentionPct = getNum('set-desiredRetention', 90);
+      settings.desiredRetention = Math.min(0.97, Math.max(0.70, retentionPct / 100));
+      settings.fsrsInheritProgress = getChk('set-fsrsInheritProgress', true);
+    } else {
+      settings.easyBonus = getNum('set-easyBonus', 130);
+      settings.intervalModifier = getNum('set-intervalModifier', 100);
+      settings.hardInterval = getNum('set-hardInterval', 120);
+    }
     settings.maxReviewsPerDay = getNum('set-maxReviewsPerDay', 9999);
-    settings.easyBonus = getNum('set-easyBonus', 130);
-    settings.intervalModifier = getNum('set-intervalModifier', 100);
     settings.maxInterval = getNum('set-maxInterval', 180);
-    settings.hardInterval = getNum('set-hardInterval', 120);
   } else if (activeSettingsTab === 'lapse') {
-    settings.relearningSteps = getVal('set-relearningSteps') || '10';
-    settings.newIntervalPercent = getNum('set-newIntervalPercent', 0);
-    settings.minInterval = getNum('set-minInterval', 1);
     settings.leechThreshold = getNum('set-leechThreshold', 8);
     settings.leechAction = (getVal('set-leechAction') as AnkiSettings['leechAction']) || 'tag';
+    if (!isFsrs) {
+      settings.relearningSteps = getVal('set-relearningSteps') || '10';
+      settings.newIntervalPercent = getNum('set-newIntervalPercent', 0);
+      settings.minInterval = getNum('set-minInterval', 1);
+    }
   } else if (activeSettingsTab === 'general') {
     settings.maxAnswerSeconds = getNum('set-maxAnswerSeconds', 60);
     settings.showTimer = getChk('set-showTimer', true);
     settings.autoPlayAudio = getChk('set-autoPlayAudio', false);
     settings.replayQuestionAudio = getChk('set-replayQuestionAudio', false);
   } else if (activeSettingsTab === 'display') {
-    const newTheme = (getVal('set-themeMode') as AnkiSettings['themeMode']) || settings.themeMode;
-    const themeChanged = newTheme !== settings.themeMode;
     settings.viewMode = (getVal('set-viewMode') as AnkiSettings['viewMode']) || settings.viewMode;
-    settings.themeMode = newTheme;
-
-    if (themeChanged) {
-      if (newTheme === 'light') {
-        settings.colorOuterBg = '#e5e7eb';
-        settings.colorCardBg = '#ffffff';
-        settings.colorBaseText = '#1f2328';
-        settings.colorWordText = '#0f172a';
-        settings.colorMeaningText = '#0969da';
-        settings.colorHighlightText = '#cf222e';
-      } else {
-        settings.colorOuterBg = '#252526';
-        settings.colorCardBg = '#1e1e1e';
-        settings.colorBaseText = '#d4d4d4';
-        settings.colorWordText = '#ffffff';
-        settings.colorMeaningText = '#9cdcfe';
-        settings.colorHighlightText = '#ce9178';
-      }
-    } else {
-      settings.colorOuterBg = getVal('set-colorOuterBg') || settings.colorOuterBg || '#252526';
-      settings.colorCardBg = getVal('set-colorCardBg') || settings.colorCardBg || '#1e1e1e';
-      settings.colorBaseText = getVal('set-colorBaseText') || settings.colorBaseText;
-      settings.colorWordText = getVal('set-colorWordText') || settings.colorWordText;
-      settings.colorMeaningText = getVal('set-colorMeaningText') || settings.colorMeaningText;
-      settings.colorHighlightText = getVal('set-colorHighlightText') || settings.colorHighlightText;
-    }
+    settings.themeMode = (getVal('set-themeMode') as AnkiSettings['themeMode']) || settings.themeMode;
+    const defaults = getDefaultColorsForTheme(settings.themeMode);
+    settings.colorOuterBg = getVal('set-colorOuterBg') || defaults.colorOuterBg;
+    settings.colorCardBg = getVal('set-colorCardBg') || defaults.colorCardBg;
+    settings.colorBaseText = getVal('set-colorBaseText') || defaults.colorBaseText;
+    settings.colorWordText = getVal('set-colorWordText') || defaults.colorWordText;
+    settings.colorMeaningText = getVal('set-colorMeaningText') || defaults.colorMeaningText;
+    settings.colorHighlightText = getVal('set-colorHighlightText') || defaults.colorHighlightText;
   }
   saveSettings(settings);
 }
@@ -1235,30 +1229,36 @@ function collectCurrentTabInputs(): void {
 function attachSettingsModalEvents(): void {
   if (!isSettingsModalOpen) return;
 
-  document.querySelectorAll<HTMLButtonElement>('.gh-color-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const targetId = chip.dataset.target!;
-      const hex = chip.dataset.hex!;
-      const inputEl = document.getElementById(targetId) as HTMLInputElement | null;
-      if (inputEl) {
-        inputEl.value = hex;
-        collectCurrentTabInputs();
-      }
-    });
-  });
-
-  document.querySelectorAll<HTMLInputElement>('.custom-color-input').forEach(input => {
-    input.addEventListener('input', () => {
-      collectCurrentTabInputs();
-    });
-  });
-
   document.querySelectorAll<HTMLButtonElement>('.pro-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       collectCurrentTabInputs();
       activeSettingsTab = btn.dataset.tab as SettingsTab;
       render();
     });
+  });
+
+  // 🔄 FSRS <-> SM-2 엔진 변경 시 즉시 SM-2 전용 설정 잠금/해제 반영
+  document.getElementById('set-schedulerEngine')?.addEventListener('change', (e) => {
+    const newEngine = (e.target as HTMLSelectElement).value as 'fsrs' | 'sm2';
+    collectCurrentTabInputs();
+    settings.schedulerEngine = newEngine;
+    saveSettings(settings);
+    render();
+  });
+
+  // 🎨 다크 <-> 라이트 테마 변경 시 해당 모드의 기본 색상 팔레트로 자동 세팅
+  document.getElementById('set-themeMode')?.addEventListener('change', (e) => {
+    const newTheme = (e.target as HTMLSelectElement).value as 'dark' | 'light';
+    const modeColors = getDefaultColorsForTheme(newTheme);
+    settings.themeMode = newTheme;
+    settings.colorOuterBg = modeColors.colorOuterBg;
+    settings.colorCardBg = modeColors.colorCardBg;
+    settings.colorBaseText = modeColors.colorBaseText;
+    settings.colorWordText = modeColors.colorWordText;
+    settings.colorMeaningText = modeColors.colorMeaningText;
+    settings.colorHighlightText = modeColors.colorHighlightText;
+    saveSettings(settings);
+    render();
   });
 
   const closeAndSave = () => {
@@ -1271,12 +1271,20 @@ function attachSettingsModalEvents(): void {
   document.getElementById('btn-close-modal-x')?.addEventListener('click', closeAndSave);
   document.getElementById('btn-save-settings')?.addEventListener('click', closeAndSave);
 
+  // 🔄 기본값 복원: 현재 모드(다크/라이트) 및 화면 크기(PC/모바일)는 유지하면서 해당 모드의 기본 색상 + 학습 가중치 복원
   document.getElementById('btn-restore-defaults')?.addEventListener('click', () => {
-    if (confirm('인터넷 Anki 추천 국밥 세팅으로 모든 설정을 초기화하시겠습니까?')) {
+    const themeSelect = document.getElementById('set-themeMode') as HTMLSelectElement | null;
+    const viewSelect = document.getElementById('set-viewMode') as HTMLSelectElement | null;
+    const currentTheme = (themeSelect?.value as 'dark' | 'light') || settings.themeMode;
+    const currentView = (viewSelect?.value as 'pc' | 'mobile') || settings.viewMode;
+
+    if (confirm(`현재 모드(${currentTheme === 'dark' ? '다크 모드' : '라이트 모드'})를 유지한 상태로 모든 색상과 학습 설정을 기본값으로 복원하시겠습니까?`)) {
+      const modeColors = getDefaultColorsForTheme(currentTheme);
       saveSettings({
         ...DEFAULT_ANKI_SETTINGS,
-        viewMode: settings.viewMode,
-        themeMode: settings.themeMode
+        viewMode: currentView,
+        themeMode: currentTheme,
+        ...modeColors,
       });
       render();
     }

@@ -1421,3 +1421,42 @@ body.theme-dark .image-upload-zone {
   background: #252526 !important;
   border: 1px solid #383838 !important;
 }
+
+/* 🔒 FSRS 활성화 시 SM-2 전용 설정 자동 비활성화(잠금) 스타일 */
+.setting-row-disabled {
+  opacity: 0.42;
+  pointer-events: none;
+  user-select: none;
+  filter: grayscale(0.4);
+  transition: opacity 0.2s ease;
+}
+
+.setting-row-disabled .setting-input,
+.setting-row-disabled .setting-select {
+  cursor: not-allowed;
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.sm2-only-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.fsrs-lock-banner {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: var(--text-primary);
+}
