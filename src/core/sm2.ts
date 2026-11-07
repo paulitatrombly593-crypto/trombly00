@@ -49,6 +49,8 @@ export const DEFAULT_ANKI_SETTINGS: AnkiSettings = {
   // 5. 화면 및 VS Code Dark+ 섹터별 기본 글자색 설정
   viewMode: typeof window !== 'undefined' && window.innerWidth <= 640 ? 'mobile' : 'pc',
   themeMode: 'dark',
+  colorOuterBg: '#252526',       // 바깥쪽: VS Code 사이드바 부드러운 회색
+  colorCardBg: '#1e1e1e',        // 안쪽(플래시카드): VS Code 중앙 에디터 깊은 다크
   colorBaseText: '#d4d4d4',      // VS Code 기본 텍스트 (차분한 라이트 그레이)
   colorWordText: '#ffffff',      // 학습 단어 (화이트)
   colorMeaningText: '#9cdcfe',   // 학습 뜻 (VS Code 변수 스카이블루)

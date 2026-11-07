@@ -46,6 +46,8 @@ export interface AnkiSettings {
   // 5. [화면 레이아웃 및 섹터별 글자색] 설정
   viewMode: 'pc' | 'mobile';
   themeMode: 'dark' | 'light';
+  colorOuterBg?: string;      // 바깥쪽 여백 배경색 (VS Code 사이드바 회색 #252526)
+  colorCardBg?: string;       // 플래시카드/박스 안쪽 배경색 (VS Code 에디터 블랙 #1e1e1e)
   colorBaseText?: string;
   colorWordText?: string;
   colorMeaningText?: string;

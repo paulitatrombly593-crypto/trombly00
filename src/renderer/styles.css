@@ -1384,3 +1384,40 @@ body.theme-dark .study-box {
   background: #ffffff;
   padding: 8px;
 }
+
+/* =========================================================
+   🎯 VS Code Dark+ 안·밖 명도 대비 (바깥 회색 #252526 + 중앙 플래시카드 다크 #1e1e1e)
+   ========================================================= */
+:root {
+  --custom-outer-bg: #252526;
+  --custom-card-bg: #1e1e1e;
+}
+
+body.theme-dark {
+  /* 네모 바깥쪽(전체 배경): 눈이 편안한 VS Code 사이드바 회색 */
+  --bg-main: var(--custom-outer-bg, #252526) !important;
+  /* 네모 안쪽(플래시카드 & 메인 박스): 시선이 집중되는 깊은 에디터 다크 */
+  --bg-card: var(--custom-card-bg, #1e1e1e) !important;
+  --border-color: #3c3c3c !important;
+}
+
+body.theme-light {
+  --bg-main: var(--custom-outer-bg, #e5e7eb) !important;
+  --bg-card: var(--custom-card-bg, #ffffff) !important;
+  --border-color: #d1d5db !important;
+}
+
+/* 가운데 플래시카드가 바깥 회색 배경과 선명하게 구분되도록 입체 보더 & 깊이감 부여 */
+body.theme-dark .study-box,
+body.theme-dark .card-box {
+  background: var(--bg-card) !important;
+  border: 1px solid #3c3c3c !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+/* 카드 내부의 서브 아이템(단어 줄, 입력창)은 바깥 회색톤과 조화롭게 구분 */
+body.theme-dark .deck-item,
+body.theme-dark .image-upload-zone {
+  background: #252526 !important;
+  border: 1px solid #383838 !important;
+}

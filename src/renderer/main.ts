@@ -90,6 +90,10 @@ function applyDisplayClasses(): void {
   document.body.classList.add(`mode-${settings.viewMode}`, `theme-${settings.themeMode}`);
 
   const root = document.documentElement;
+  const defaultOuter = settings.themeMode === 'light' ? '#e5e7eb' : '#252526';
+  const defaultCard = settings.themeMode === 'light' ? '#ffffff' : '#1e1e1e';
+  root.style.setProperty('--custom-outer-bg', settings.colorOuterBg || defaultOuter);
+  root.style.setProperty('--custom-card-bg', settings.colorCardBg || defaultCard);
   root.style.setProperty('--sector-base-color', settings.colorBaseText || '#d4d4d4');
   root.style.setProperty('--sector-word-color', settings.colorWordText || '#ffffff');
   root.style.setProperty('--sector-meaning-color', settings.colorMeaningText || '#9cdcfe');
@@ -1035,6 +1039,34 @@ function renderSettingsModalHtml(): string {
 
       <div class="setting-row">
         <div>
+          <div class="setting-label">🖼️ 바깥쪽 배경색 (네모 바깥 여백)</div>
+          <div class="setting-desc">눈의 피로를 줄여주는 외곽 회색 톤 (VS Code 기본: #252526)</div>
+        </div>
+        <div class="color-picker-group">
+          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#252526" style="background:#252526;" title="VS Code 사이드바 그레이 (#252526)"></button>
+          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#2d2d30" style="background:#2d2d30;" title="소프트 웜 그레이 (#2d2d30)"></button>
+          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#333337" style="background:#333337;" title="라이트 차콜 그레이 (#333337)"></button>
+          <button type="button" class="gh-color-chip" data-target="set-colorOuterBg" data-hex="#18181b" style="background:#18181b;" title="딥 다크 (#18181b)"></button>
+          <input type="color" id="set-colorOuterBg" class="custom-color-input" value="${settings.colorOuterBg || '#252526'}" />
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">🃏 플래시카드 안쪽 배경색 (네모 내부)</div>
+          <div class="setting-desc">가운데 단어에 집중하게 해주는 깊은 다크 톤 (VS Code 기본: #1e1e1e)</div>
+        </div>
+        <div class="color-picker-group">
+          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#1e1e1e" style="background:#1e1e1e;" title="VS Code 에디터 다크 (#1e1e1e)"></button>
+          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#141416" style="background:#141416;" title="딥 블랙 (#141416)"></button>
+          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#161b22" style="background:#161b22;" title="GitHub 다크 (#161b22)"></button>
+          <button type="button" class="gh-color-chip" data-target="set-colorCardBg" data-hex="#252526" style="background:#252526;" title="미디엄 다크 (#252526)"></button>
+          <input type="color" id="set-colorCardBg" class="custom-color-input" value="${settings.colorCardBg || '#1e1e1e'}" />
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div>
           <div class="setting-label">1. 기본 UI 글자색 (홈·설정·목록)</div>
           <div class="setting-desc">전체 화면 기본 텍스트 색상</div>
         </div>
@@ -1174,17 +1206,23 @@ function collectCurrentTabInputs(): void {
 
     if (themeChanged) {
       if (newTheme === 'light') {
+        settings.colorOuterBg = '#e5e7eb';
+        settings.colorCardBg = '#ffffff';
         settings.colorBaseText = '#1f2328';
         settings.colorWordText = '#0f172a';
         settings.colorMeaningText = '#0969da';
         settings.colorHighlightText = '#cf222e';
       } else {
+        settings.colorOuterBg = '#252526';
+        settings.colorCardBg = '#1e1e1e';
         settings.colorBaseText = '#d4d4d4';
         settings.colorWordText = '#ffffff';
         settings.colorMeaningText = '#9cdcfe';
         settings.colorHighlightText = '#ce9178';
       }
     } else {
+      settings.colorOuterBg = getVal('set-colorOuterBg') || settings.colorOuterBg || '#252526';
+      settings.colorCardBg = getVal('set-colorCardBg') || settings.colorCardBg || '#1e1e1e';
       settings.colorBaseText = getVal('set-colorBaseText') || settings.colorBaseText;
       settings.colorWordText = getVal('set-colorWordText') || settings.colorWordText;
       settings.colorMeaningText = getVal('set-colorMeaningText') || settings.colorMeaningText;
