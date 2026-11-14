@@ -4,7 +4,7 @@ import { AppPaths } from './paths';
 import { StorageManager } from './storage';
 import { Logger } from './logger';
 import { SM2Scheduler } from '../core/sm2';
-import { StorageSchema, Deck, Card, ReviewRating } from '../shared/types';
+import { StorageSchema, Deck, Card, ReviewRating, AnkiSettings } from '../shared/types';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -126,16 +126,31 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('storage:review-card', async (_, deckId: string, cardId: string, rating: ReviewRating): Promise<Card> => {
-    const data = StorageManager.load();
-    const deck = data.decks.find(d => d.id === deckId);
-    if (!deck) throw new Error(`Deck not found: ${deckId}`);
+  ipcMain.handle(
+    'storage:review-card',
+    async (
+      _,
+      deckId: string,
+      cardId: string,
+      rating: ReviewRating,
+      settings?: AnkiSettings,
+      durationSeconds?: number
+    ): Promise<Card> => {
+      const data = StorageManager.load();
+      const deck = data.decks.find(d => d.id === deckId);
+      if (!deck) throw new Error(`Deck not found: ${deckId}`);
 
-    const cardIndex = deck.cards.findIndex(c => c.id === cardId);
-    if (cardIndex === -1) throw new Error(`Card not found: ${cardId}`);
+      const cardIndex = deck.cards.findIndex(c => c.id === cardId);
+      if (cardIndex === -1) throw new Error(`Card not found: ${cardId}`);
 
-    const target = deck.cards[cardIndex];
-    const { updatedCard, log } = SM2Scheduler.calculate(target, rating);
+      const target = deck.cards[cardIndex];
+      const { updatedCard, log } = SM2Scheduler.calculate(
+        target,
+        rating,
+        new Date(),
+        settings,
+        durationSeconds
+      );
 
     deck.cards[cardIndex] = updatedCard;
     data.logs.push(log);

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IAnkiAPI } from '../shared/api';
-import { StorageSchema, Deck, Card, ReviewRating } from '../shared/types';
+import { StorageSchema, Deck, Card, ReviewRating, AnkiSettings } from '../shared/types';
 
 /**
  * Electron 메인 프로세스와 안전하게 통신하는 Preload 브릿지
@@ -24,8 +24,14 @@ const ankiAPI: IAnkiAPI = {
     ipcRenderer.invoke('storage:update-card', deckId, cardId, updates),
   deleteCard: (deckId: string, cardId: string): Promise<void> => 
     ipcRenderer.invoke('storage:delete-card', deckId, cardId),
-  reviewCard: (deckId: string, cardId: string, rating: ReviewRating): Promise<Card> => 
-    ipcRenderer.invoke('storage:review-card', deckId, cardId, rating),
+  reviewCard: (
+    deckId: string,
+    cardId: string,
+    rating: ReviewRating,
+    settings?: AnkiSettings,
+    durationSeconds?: number
+  ): Promise<Card> =>
+    ipcRenderer.invoke('storage:review-card', deckId, cardId, rating, settings, durationSeconds),
   importStorageData: (data: StorageSchema): Promise<void> => 
     ipcRenderer.invoke('storage:import-data', data)
 };

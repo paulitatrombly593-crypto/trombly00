@@ -483,23 +483,35 @@ function compressImageToDataUrl(fileOrBlob: File | Blob, maxSize = 600, quality 
 }
 
 function buildDailyStudyQueue(deck: Deck, logs: StorageSchema['logs']): { queue: Card[]; dueNewCount: number; dueRevCount: number } {
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayLogs = logs.filter(l => l.deckId === deck.id && l.reviewDate.startsWith(todayStr));
-  const reviewedCardIdsToday = new Set(todayLogs.map(l => l.cardId));
-
-  const remainingNewQuota = Math.max(0, settings.newCardsPerDay - [...reviewedCardIdsToday].filter(id => {
-    const c = deck.cards.find(card => card.id === id);
-    return c && c.repetitions <= 1;
-  }).length);
-
-  const remainingReviewQuota = Math.max(0, settings.maxReviewsPerDay - todayLogs.length);
-
-  const learningDue = deck.cards.filter(
-    c => !c.suspended && (c.state === 'learning' || c.state === 'relearning') && SM2Scheduler.isDue(c)
+  const todayDayKey = SM2Scheduler.getKstStudyDayKey(new Date());
+  const todayLogs = logs.filter(
+    l => l.deckId === deck.id && SM2Scheduler.getKstStudyDayKey(new Date(l.reviewDate)) === todayDayKey
   );
+
+  // 오늘 처음 시작한 '새 카드' 고유 ID 수 (기존 복습 카드 실패로 repetitions가 0이 되어도 새 카드 할당량 미차감)
+  const todayNewCardIds = new Set(
+    todayLogs
+      .filter(l => (l.prevState ? l.prevState === 'new' : l.lastInterval === 0))
+      .map(l => l.cardId)
+  );
+
+  // 오늘 완료한 '정규 복습 카드' 고유 ID 수 (새 카드나 2분/10분 단기 반복으로 복습 할당량 미차감)
+  const todayReviewCardIds = new Set(
+    todayLogs
+      .filter(l => (l.prevState ? l.prevState === 'review' : l.lastInterval > 0))
+      .map(l => l.cardId)
+  );
+
+  const remainingNewQuota = Math.max(0, settings.newCardsPerDay - todayNewCardIds.size);
+  const remainingReviewQuota = Math.max(0, settings.maxReviewsPerDay - todayReviewCardIds.size);
+
+  const learningDue = deck.cards
+    .filter(c => !c.suspended && (c.state === 'learning' || c.state === 'relearning') && SM2Scheduler.isDue(c))
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
   const reviewDue = deck.cards
     .filter(c => !c.suspended && c.state === 'review' && SM2Scheduler.isDue(c))
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
     .slice(0, remainingReviewQuota);
 
   let newCandidates = deck.cards.filter(c => !c.suspended && c.state === 'new');
@@ -602,16 +614,18 @@ function attachAllCardsModalEvents(): void {
 // =========================================================
 async function renderTodayQuotaPage(): Promise<void> {
   const data = await api.getStorageData();
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayDayKey = SM2Scheduler.getKstStudyDayKey(new Date());
   const now = new Date();
 
-  const todayLogs = data.logs.filter(l => l.reviewDate.startsWith(todayStr));
+  const todayLogs = data.logs.filter(
+    l => SM2Scheduler.getKstStudyDayKey(new Date(l.reviewDate)) === todayDayKey
+  );
   const completedItemsHtml = todayLogs.slice().reverse().map(log => {
     const deck = data.decks.find(d => d.id === log.deckId);
     const card = deck?.cards.find(c => c.id === log.cardId);
     if (!card || !deck) return '';
 
-    const isNewLearned = log.lastInterval === 0;
+    const isNewLearned = log.prevState ? log.prevState === 'new' : log.lastInterval === 0;
     const typeBadge = isNewLearned
       ? `<span class="tag-badge tag-new">🌱 오늘 신규 학습</span>`
       : `<span class="tag-badge tag-due-later">🔄 오늘 복습 완료</span>`;
@@ -2853,13 +2867,16 @@ async function handleRatingWithReaction(rating: ReviewRating): Promise<void> {
   };
   triggerReactionBadge(reactionMap[rating]);
 
-  await api.reviewCard(studyingDeckId, currentCard.id, rating, settings, durationSec);
+  const updatedCard = await api.reviewCard(studyingDeckId, currentCard.id, rating, settings, durationSec);
+
+  // 🔄 분 단위 단기 학습/재학습(learning/relearning)으로 남은 카드는 현재 세션 뒤쪽에 재삽입!
+  if (updatedCard.state === 'learning' || updatedCard.state === 'relearning') {
+    studyQueue.push(updatedCard);
+  }
 
   setTimeout(async () => {
     currentCardIndex++;
     isAnswerRevealed = false;
-    isProcessingRating = false;
-    determineCardDirection();
     await render();
 
     if (settings.autoPlayAudio && studyQueue[currentCardIndex]) {

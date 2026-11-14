@@ -58,6 +58,38 @@ export const DEFAULT_ANKI_SETTINGS: AnkiSettings = {
 };
 
 export class SM2Scheduler {
+  private static readonly KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  private static readonly STUDY_DAY_START_HOUR = 3; // 새벽 3시 기준
+
+  /**
+   * 한국 시간(KST) 오전 03:00 경계 기준의 '학습일 문자열(YYYY-MM-DD)' 반환
+   * 예: 11/14 02:59 KST -> '2026-11-13', 11/14 03:00 KST -> '2026-11-14'
+   */
+  public static getKstStudyDayKey(date: Date = new Date()): string {
+    const shifted = new Date(
+      date.getTime() + this.KST_OFFSET_MS - this.STUDY_DAY_START_HOUR * 60 * 60 * 1000
+    );
+    return shifted.toISOString().slice(0, 10);
+  }
+
+  /**
+   * 현재 KST 학습일의 오전 03:00:00 정각 UTC Date 객체 반환
+   */
+  public static getKstStudyDayStart(date: Date = new Date()): Date {
+    const dayKey = this.getKstStudyDayKey(date); // YYYY-MM-DD
+    const [y, m, d] = dayKey.split('-').map(Number);
+    // KST 03:00 == UTC 전날 18:00 (Date.UTC(y, m-1, d, 3, 0, 0) - 9시간)
+    return new Date(Date.UTC(y, m - 1, d, this.STUDY_DAY_START_HOUR, 0, 0, 0) - this.KST_OFFSET_MS);
+  }
+
+  /**
+   * 하루(1일) 이상 넘어가는 복습 간격을 KST 오전 03:00 기준으로 계산
+   */
+  public static addStudyDays(now: Date, days: number): Date {
+    const start = this.getKstStudyDayStart(now);
+    return new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
   private static readonly MIN_EASE_FACTOR = 1.3;
 
   /**
@@ -146,7 +178,7 @@ export class SM2Scheduler {
           nextStepIndex = 0;
           nextRepetitions = 1;
           nextIntervalDays = Math.min(maxIvl, Math.max(1, settings.graduatingInterval));
-          nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+          nextDueDate = this.addStudyDays(now, nextIntervalDays);
           nextDueText = `${nextIntervalDays}일`;
         }
       } else {
@@ -156,7 +188,7 @@ export class SM2Scheduler {
         nextRepetitions = 1;
         nextIntervalDays = Math.min(maxIvl, Math.max(1, settings.easyInterval));
         nextEaseFactor += 0.15;
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = this.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
@@ -184,14 +216,14 @@ export class SM2Scheduler {
           nextState = 'review';
           nextStepIndex = 0;
           nextIntervalDays = Math.max(settings.minInterval, card.interval || 1);
-          nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+          nextDueDate = this.addStudyDays(now, nextIntervalDays);
           nextDueText = `${nextIntervalDays}일`;
         }
       } else {
         nextState = 'review';
         nextStepIndex = 0;
         nextIntervalDays = Math.max(settings.minInterval + 1, Math.round((card.interval || 1) * easyMult));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = this.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
@@ -228,7 +260,7 @@ export class SM2Scheduler {
           nextDueText = `${mins}분`;
         } else {
           nextState = 'review';
-          nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+          nextDueDate = this.addStudyDays(now, nextIntervalDays);
           nextDueText = `${nextIntervalDays}일`;
         }
       } else if (rating === 2) {
@@ -236,13 +268,13 @@ export class SM2Scheduler {
         nextRepetitions += 1;
         nextEaseFactor = Math.max(this.MIN_EASE_FACTOR, nextEaseFactor - 0.15);
         nextIntervalDays = Math.min(maxIvl, Math.max(baseIvl + 1, Math.round(baseIvl * hardMult * ivlMod)));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = this.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else if (rating === 3) {
         // 알맞음(Good)
         nextRepetitions += 1;
         nextIntervalDays = Math.min(maxIvl, Math.max(baseIvl + 1, Math.round(baseIvl * nextEaseFactor * ivlMod)));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = this.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else {
         // 쉬움(Easy)
@@ -252,7 +284,7 @@ export class SM2Scheduler {
           maxIvl,
           Math.max(baseIvl + 2, Math.round(baseIvl * nextEaseFactor * easyMult * ivlMod))
         );
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = this.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
@@ -277,6 +309,7 @@ export class SM2Scheduler {
       cardId: card.id,
       deckId: card.deckId,
       rating,
+      prevState: card.state,
       reviewDate: now.toISOString(),
       lastInterval,
       scheduledInterval: nextIntervalDays,
@@ -336,8 +369,11 @@ export class SM2Scheduler {
       return `⏳ 약 ${diffHours}시간 후`;
     }
 
-    const diffDays = Math.ceil(diffHours / 24);
-    const dateStr = `${due.getMonth() + 1}/${due.getDate()}`;
+    const nowStudyStart = this.getKstStudyDayStart(now).getTime();
+    const dueStudyStart = this.getKstStudyDayStart(due).getTime();
+    const diffDays = Math.max(1, Math.round((dueStudyStart - nowStudyStart) / (24 * 60 * 60 * 1000)));
+    const kstDue = new Date(due.getTime() + this.KST_OFFSET_MS);
+    const dateStr = `${kstDue.getUTCMonth() + 1}/${kstDue.getUTCDate()}`;
     return `📅 ${diffDays}일 후 (${dateStr})`;
   }
 

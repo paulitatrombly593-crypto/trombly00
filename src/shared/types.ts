@@ -93,6 +93,7 @@ export interface ReviewLog {
   cardId: string;
   deckId: string;
   rating: ReviewRating;
+  prevState?: CardState;
   reviewDate: string;
   lastInterval: number;
   scheduledInterval: number;

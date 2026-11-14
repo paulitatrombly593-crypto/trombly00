@@ -1,5 +1,5 @@
 import { Card, ReviewRating, ReviewLog, AnkiSettings } from '../shared/types';
-import { ScheduleResult } from './sm2';
+import { SM2Scheduler, ScheduleResult } from './sm2';
 
 /**
  * 🚀 순수 FSRS-5 (Free Spaced Repetition Scheduler v5) DSR 엔진
@@ -233,7 +233,7 @@ export class FSRSScheduler {
         nextState = 'review';
         nextRepetitions = 1;
         nextIntervalDays = this.nextInterval(s, desiredRetention, maxIvl);
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else if (rating === 3) {
         // 3. 알맞음 (Good): S0(3) = 3.17일 -> 유지율 반영 일수 (기본 3일, 최소 Hard+1일 보장)
@@ -242,7 +242,7 @@ export class FSRSScheduler {
         const hardIvl = this.nextInterval(this.initStability(2), desiredRetention, maxIvl);
         const goodIvl = this.nextInterval(s, desiredRetention, maxIvl);
         nextIntervalDays = Math.min(maxIvl, Math.max(hardIvl + 1, goodIvl));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else {
         // 4. 쉬움 (Easy): S0(4) = 15.69일 -> 유지율 반영 일수 (기본 16일, 최소 Good+2일 보장)
@@ -255,7 +255,7 @@ export class FSRSScheduler {
         );
         const easyIvl = this.nextInterval(s, desiredRetention, maxIvl);
         nextIntervalDays = Math.min(maxIvl, Math.max(goodIvl + 2, easyIvl));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
@@ -282,7 +282,7 @@ export class FSRSScheduler {
         nextState = 'review';
         nextRepetitions += 1;
         nextIntervalDays = Math.max(1, this.nextInterval(s, desiredRetention, maxIvl));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else {
         nextState = 'review';
@@ -291,7 +291,7 @@ export class FSRSScheduler {
         const goodIvl = Math.max(1, this.nextInterval(goodS, desiredRetention, maxIvl));
         const easyIvl = this.nextInterval(Math.max(s, this.initStability(3)), desiredRetention, maxIvl);
         nextIntervalDays = Math.min(maxIvl, Math.max(goodIvl + 2, easyIvl));
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
@@ -339,7 +339,7 @@ export class FSRSScheduler {
         else if (rating === 3) nextIntervalDays = ivlGood;
         else nextIntervalDays = ivlEasy;
 
-        nextDueDate.setDate(nextDueDate.getDate() + nextIntervalDays);
+        nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
@@ -369,6 +369,7 @@ export class FSRSScheduler {
       cardId: card.id,
       deckId: card.deckId,
       rating,
+      prevState: card.state,
       reviewDate: now.toISOString(),
       lastInterval,
       scheduledInterval: nextIntervalDays,
