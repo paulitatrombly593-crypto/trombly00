@@ -1,5 +1,6 @@
 import './styles.css';
 import { getAnkiAPI } from './api-adapter';
+import { FSRSScheduler } from '../core/fsrs';
 import { Deck, Card, ReviewRating, StorageSchema, AnkiSettings } from '../shared/types';
 import { SM2Scheduler, DEFAULT_ANKI_SETTINGS } from '../core/sm2';
 import { CsvParser } from '../shared/csv-parser';
@@ -942,6 +943,33 @@ function renderSettingsModalHtml(): string {
           <input type="checkbox" id="set-fsrsInheritProgress" ${settings.fsrsInheritProgress !== false ? 'checked' : ''} ${!isFsrs ? 'disabled' : ''} style="width: 18px; height: 18px;" />
         </div>
       </div>
+      ${isFsrs ? `
+        <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 12px; padding: 12px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+            <div>
+              <div class="setting-label" style="color: #10b981;">✨ FSRS 내 기억력 맞춤 최적화</div>
+              <div class="setting-desc">
+                ${settings.fsrsWeights
+                  ? `✅ 맞춤 적용됨 (Log Loss: ${settings.optimizedLogLoss ?? '-'} · ${settings.lastOptimizedAt ? new Date(settings.lastOptimizedAt).toLocaleDateString() : ''})`
+                  : '기본 글로벌 가중치 사용 중 (복습량 500개 이상부터 권장)'}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" id="btn-optimize-fsrs" class="btn-primary" style="padding: 7px 12px; font-size: 12px; background: #10b981;">
+              ⚡ 지금 최적화 실행
+            </button>
+            ${settings.fsrsWeights ? `
+              <button type="button" id="btn-reset-fsrs-weights" class="btn-secondary" style="padding: 7px 12px; font-size: 12px;">
+                기본 가중치로 복원
+              </button>
+            ` : ''}
+            <button type="button" id="btn-reset-review-logs" class="btn-danger" style="padding: 7px 12px; font-size: 12px; margin-left: auto;">
+              🗑️ 기존 로그 초기화 (0부터 쌓기)
+            </button>
+          </div>
+        </div>
+      ` : ''}
       ${fsrsLockNotice}
       <div class="setting-row">
         <div>
@@ -1304,6 +1332,86 @@ function attachSettingsModalEvents(): void {
       });
       render();
     }
+  });
+
+  // ⚡ FSRS 가중치 최적화 실행 (500개 미만 권장 경고 + Log Loss 개선 시에만 저장)
+  document.getElementById('btn-optimize-fsrs')?.addEventListener('click', async () => {
+    const data = await api.getStorageData();
+    const validSamples = FSRSScheduler.countValidReviewSamples(data.logs);
+
+    if (validSamples === 0) {
+      alert('아직 다음 날 이후로 넘어간 정규 복습 기록이 없어 최적화를 진행할 수 없습니다.\n최소 1일 이상 지나 복습한 기록이 쌓인 뒤 다시 시도해 주세요.');
+      return;
+    }
+
+    if (validSamples < 500) {
+      const proceed = confirm(
+        `⚠️ 현재 유효 복습량이 ${validSamples}개입니다.\n\n` +
+        `정확한 개인화를 위해 복습량이 500개 이상부터 최적화하는 것을 권장합니다.\n` +
+        `그래도 지금 최적화를 진행하시겠습니까?`
+      );
+      if (!proceed) return;
+    }
+
+    const result = FSRSScheduler.optimizeParameters(data.logs, settings.fsrsWeights);
+
+    if (!result.improved) {
+      alert(
+        `ℹ️ 최적화 분석 완료 (유효 복습 ${result.sampleCount}개)\n\n` +
+        `현재 가중치(Log Loss: ${result.baselineLoss})보다 예측 오차가 더 줄어들지 않아,\n` +
+        `안전장치에 의해 기존 가중치를 그대로 유지합니다.`
+      );
+      return;
+    }
+
+    settings.fsrsWeights = result.weights;
+    settings.optimizedLogLoss = result.optimizedLoss;
+    settings.lastOptimizedAt = new Date().toISOString();
+    saveSettings(settings);
+
+    alert(
+      `🎉 FSRS 맞춤 최적화 적용 완료!\n\n` +
+      `• 분석한 복습량: ${result.sampleCount}개 (${result.mode === 'pretrain' ? '초기 안정성 중심 보정' : '전체 가중치 보정'})\n` +
+      `• 예측 오차(Log Loss): ${result.baselineLoss} ➔ ${result.optimizedLoss} (개선됨)`
+    );
+    render();
+  });
+
+  // 🔄 FSRS 가중치만 글로벌 기본값으로 복원
+  document.getElementById('btn-reset-fsrs-weights')?.addEventListener('click', () => {
+    if (!confirm('개인화된 FSRS 가중치를 글로벌 기본 가중치로 되돌리시겠습니까?')) return;
+    settings.fsrsWeights = undefined;
+    settings.optimizedLogLoss = undefined;
+    settings.lastOptimizedAt = undefined;
+    saveSettings(settings);
+    render();
+  });
+
+  // 🗑️ 기존 로그 초기화 (0부터 다시 쌓기)
+  document.getElementById('btn-reset-review-logs')?.addEventListener('click', async () => {
+    const data = await api.getStorageData();
+    if (data.logs.length === 0) {
+      alert('이미 복습 로그가 0개입니다.');
+      return;
+    }
+    if (
+      !confirm(
+        `현재 누적된 ${data.logs.length}개의 복습 로그를 모두 삭제하고 0부터 다시 쌓으시겠습니까?\n\n` +
+        `• 모든 단어장과 단어 카드는 그대로 유지됩니다.\n` +
+        `• 잔디밭 기록 및 FSRS 맞춤 가중치는 초기화됩니다.`
+      )
+    ) {
+      return;
+    }
+
+    await api.importStorageData({ ...data, logs: [] });
+    settings.fsrsWeights = undefined;
+    settings.optimizedLogLoss = undefined;
+    settings.lastOptimizedAt = undefined;
+    saveSettings(settings);
+
+    alert('🗑️ 기존 복습 로그가 초기화되었습니다. 지금부터 새로운 기록이 0부터 쌓입니다!');
+    render();
   });
 
   document.getElementById('btn-export-json')?.addEventListener('click', async () => {

@@ -1,17 +1,21 @@
 import { Card, ReviewRating, ReviewLog, AnkiSettings } from '../shared/types';
 import { SM2Scheduler, ScheduleResult } from './sm2';
 
+export interface FsrsOptimizeResult {
+  improved: boolean;
+  sampleCount: number;
+  baselineLoss: number;
+  optimizedLoss: number;
+  weights: number[];
+  mode: 'pretrain' | 'full';
+}
+
 /**
- * 🚀 순수 FSRS-5 (Free Spaced Repetition Scheduler v5) DSR 엔진
- * - SM-2의 수동 익힘 단계(learningSteps)와 완전히 분리되어 독립 계산됩니다.
- * - 세 가지 핵심 기억 변수:
- *   D (Difficulty, 난이도 1~10)
- *   S (Stability, 기억 안정성: 암기 유지율이 90%로 떨어질 때까지 걸리는 일수)
- *   R (Retrievability, 현재 시점 예상 기억 인출 확률)
+ * 🚀 순수 FSRS-5 (Free Spaced Repetition Scheduler v5) DSR 엔진 + 개인화 최적화기
  */
 export class FSRSScheduler {
   // FSRS-5 공식 글로벌 표준 파라미터 (w0 ~ w18)
-  private static readonly DEFAULT_WEIGHTS: number[] = [
+  public static readonly DEFAULT_WEIGHTS: number[] = [
     0.40255,  // w0: 초기 안정성 S0(1: 다시)
     1.18385,  // w1: 초기 안정성 S0(2: 어려움) -> 약 1일
     3.17300,  // w2: 초기 안정성 S0(3: 알맞음) -> 약 3일
@@ -33,6 +37,29 @@ export class FSRSScheduler {
     0.6621    // w18: 단기 재학습 오프셋
   ];
 
+  // 파라미터별 공식 안전 상·하한선 (폭주 방지)
+  private static readonly PARAM_BOUNDS: [number, number][] = [
+    [0.1, 100],   // w0
+    [0.1, 100],   // w1
+    [0.1, 100],   // w2
+    [0.1, 100],   // w3
+    [1.0, 10.0],  // w4
+    [0.01, 4.0],  // w5
+    [0.01, 4.0],  // w6
+    [0.001, 0.75],// w7
+    [0.01, 4.5],  // w8
+    [0.01, 0.8],  // w9
+    [0.01, 3.5],  // w10
+    [0.1, 5.0],   // w11
+    [0.01, 0.5],  // w12
+    [0.01, 0.9],  // w13
+    [0.01, 4.0],  // w14
+    [0.01, 1.0],  // w15
+    [1.0, 6.0],   // w16
+    [0.01, 2.0],  // w17
+    [0.01, 2.0]   // w18
+  ];
+
   private static readonly DECAY = -0.5;
   private static readonly FACTOR = 19 / 81;
 
@@ -40,9 +67,13 @@ export class FSRSScheduler {
     return Math.min(max, Math.max(min, val));
   }
 
-  /**
-   * desiredRetention 값이 90(정수)이든 0.9(소수)든 0.70~0.97 사이 비율로 안전 정규화
-   */
+  public static getActiveWeights(settings?: AnkiSettings): number[] {
+    if (settings?.fsrsWeights && settings.fsrsWeights.length === 19) {
+      return settings.fsrsWeights;
+    }
+    return this.DEFAULT_WEIGHTS;
+  }
+
   public static normalizeRetention(rawRetention?: number): number {
     let r = rawRetention ?? 0.9;
     if (r > 100) r = 0.9;
@@ -50,32 +81,20 @@ export class FSRSScheduler {
     return this.clamp(r, 0.70, 0.97);
   }
 
-  /**
-   * 1. 초기 안정성 S0(G) (G = 1, 2, 3, 4)
-   */
   private static initStability(rating: ReviewRating, w = this.DEFAULT_WEIGHTS): number {
     return Math.max(0.1, w[rating - 1]);
   }
 
-  /**
-   * 2. 초기 난이도 D0(G) = w4 - exp(w5 * (G - 1)) + 1
-   */
   private static initDifficulty(rating: ReviewRating, w = this.DEFAULT_WEIGHTS): number {
     const d0 = w[4] - Math.exp(w[5] * (rating - 1)) + 1;
     return this.clamp(d0, 1, 10);
   }
 
-  /**
-   * 3. 단기 재학습(Again 후 재시도) 시 안정성 업데이트
-   */
   private static shortTermStability(s: number, rating: ReviewRating, w = this.DEFAULT_WEIGHTS): number {
     const sinc = Math.exp(w[17] * (rating - 3 + w[18]));
     return this.clamp(s * sinc, 0.1, 36500);
   }
 
-  /**
-   * 4. 복습 시 난이도 업데이트 (선형 감쇠 + 평균 회귀)
-   */
   private static nextDifficulty(d: number, rating: ReviewRating, w = this.DEFAULT_WEIGHTS): number {
     const deltaD = -w[6] * (rating - 3);
     const dampedD = d + (deltaD * (10 - d)) / 9;
@@ -84,18 +103,12 @@ export class FSRSScheduler {
     return this.clamp(nextD, 1, 10);
   }
 
-  /**
-   * 5. 망각 곡선 인출 확률 R(t, S)
-   */
   public static forgettingCurve(elapsedDays: number, stability: number): number {
     const s = Math.max(0.1, stability);
     const t = Math.max(0, elapsedDays);
     return Math.pow(1 + (this.FACTOR * t) / s, this.DECAY);
   }
 
-  /**
-   * 6. 복습 성공(Hard/Good/Easy) 후 새로운 안정성 S'_r(D, S, R, G)
-   */
   private static nextRecallStability(
     d: number,
     s: number,
@@ -116,9 +129,6 @@ export class FSRSScheduler {
     return this.clamp(s * sinc, 0.1, 36500);
   }
 
-  /**
-   * 7. 복습 실패(Again) 후 새로운 안정성 S'_f(D, S, R)
-   */
   private static nextForgetStability(
     d: number,
     s: number,
@@ -133,9 +143,6 @@ export class FSRSScheduler {
     return this.clamp(Math.min(sf, s), 0.1, 36500);
   }
 
-  /**
-   * 8. 목표 암기 유지율(Desired Retention)에 따른 차기 복습 간격(일) 산출
-   */
   public static nextInterval(
     stability: number,
     desiredRetention: number = 0.9,
@@ -146,9 +153,6 @@ export class FSRSScheduler {
     return this.clamp(Math.round(rawIvl), 1, Math.max(1, maxInterval));
   }
 
-  /**
-   * 9. 기존 SM-2 카드 데이터로부터 초기 S, D 추정 (진도 이어받기 켜짐 시)
-   */
   private static migrateFromSM2(card: Card): { s: number; d: number } {
     const s = Math.max(0.4, card.interval || 1);
     const ef = card.easeFactor || 2.5;
@@ -167,6 +171,7 @@ export class FSRSScheduler {
     settings: AnkiSettings,
     durationSeconds?: number
   ): ScheduleResult {
+    const w = this.getActiveWeights(settings);
     const desiredRetention = this.normalizeRetention(settings.desiredRetention);
     const maxIvl = Math.max(7, settings.maxInterval || 180);
     const inheritSM2 = settings.fsrsInheritProgress !== false;
@@ -183,7 +188,6 @@ export class FSRSScheduler {
     let isLeech = card.isLeech ?? false;
     let suspended = card.suspended ?? false;
 
-    // FSRS 고유 상태(stability, difficulty) 보유 여부 확인
     const hasFsrsData =
       typeof card.stability === 'number' &&
       card.stability > 0 &&
@@ -193,9 +197,7 @@ export class FSRSScheduler {
     let s = hasFsrsData ? card.stability! : 0;
     let d = hasFsrsData ? card.difficulty! : 0;
 
-    // 기존 SM-2 진도 이어받기가 꺼져 있고 아직 FSRS로 학습한 적이 없는 카드라면 새 카드로 취급
-    const effectiveState =
-      !hasFsrsData && !inheritSM2 ? 'new' : card.state;
+    const effectiveState = !hasFsrsData && !inheritSM2 ? 'new' : card.state;
 
     if (!hasFsrsData && inheritSM2 && effectiveState !== 'new') {
       const migrated = this.migrateFromSM2(card);
@@ -203,7 +205,6 @@ export class FSRSScheduler {
       d = migrated.d;
     }
 
-    // 경과 일수(elapsedDays) 계산
     let elapsedDays = Math.max(1, card.interval || 1);
     if (card.lastReviewedAt && hasFsrsData) {
       const diffMs = now.getTime() - new Date(card.lastReviewedAt).getTime();
@@ -212,16 +213,12 @@ export class FSRSScheduler {
       }
     }
 
-    // =========================================================
     // CASE A: FSRS 첫 학습 카드 (new)
-    // - SM-2의 '2분 6분 10분' 단계를 쓰지 않고 FSRS 초기 안정성(S0)으로 즉시 계산!
-    // =========================================================
     if (effectiveState === 'new') {
-      s = this.initStability(rating);
-      d = this.initDifficulty(rating);
+      s = this.initStability(rating, w);
+      d = this.initDifficulty(rating, w);
 
       if (rating === 1) {
-        // 1. 다시 (Again): 단기 기억 재확인 (유지율 90% 기준 5분)
         nextState = 'learning';
         nextRepetitions = 0;
         nextIntervalDays = 0;
@@ -229,29 +226,26 @@ export class FSRSScheduler {
         nextDueDate = new Date(now.getTime() + retryMins * 60 * 1000);
         nextDueText = `${retryMins}분`;
       } else if (rating === 2) {
-        // 2. 어려움 (Hard): S0(2) = 1.18일 -> 유지율 반영 일수 (기본 1일)
         nextState = 'review';
         nextRepetitions = 1;
         nextIntervalDays = this.nextInterval(s, desiredRetention, maxIvl);
         nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else if (rating === 3) {
-        // 3. 알맞음 (Good): S0(3) = 3.17일 -> 유지율 반영 일수 (기본 3일, 최소 Hard+1일 보장)
         nextState = 'review';
         nextRepetitions = 1;
-        const hardIvl = this.nextInterval(this.initStability(2), desiredRetention, maxIvl);
+        const hardIvl = this.nextInterval(this.initStability(2, w), desiredRetention, maxIvl);
         const goodIvl = this.nextInterval(s, desiredRetention, maxIvl);
         nextIntervalDays = Math.min(maxIvl, Math.max(hardIvl + 1, goodIvl));
         nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       } else {
-        // 4. 쉬움 (Easy): S0(4) = 15.69일 -> 유지율 반영 일수 (기본 16일, 최소 Good+2일 보장)
         nextState = 'review';
         nextRepetitions = 1;
-        const hardIvl = this.nextInterval(this.initStability(2), desiredRetention, maxIvl);
+        const hardIvl = this.nextInterval(this.initStability(2, w), desiredRetention, maxIvl);
         const goodIvl = Math.max(
           hardIvl + 1,
-          this.nextInterval(this.initStability(3), desiredRetention, maxIvl)
+          this.nextInterval(this.initStability(3, w), desiredRetention, maxIvl)
         );
         const easyIvl = this.nextInterval(s, desiredRetention, maxIvl);
         nextIntervalDays = Math.min(maxIvl, Math.max(goodIvl + 2, easyIvl));
@@ -259,12 +253,10 @@ export class FSRSScheduler {
         nextDueText = `${nextIntervalDays}일`;
       }
     }
-    // =========================================================
-    // CASE B: FSRS 단기 재확인 중인 카드 (learning / relearning)
-    // =========================================================
+    // CASE B: 단기 재확인 (learning / relearning)
     else if (effectiveState === 'learning' || effectiveState === 'relearning') {
-      s = this.shortTermStability(s || this.initStability(1), rating);
-      d = this.nextDifficulty(d || this.initDifficulty(1), rating);
+      s = this.shortTermStability(s || this.initStability(1, w), rating, w);
+      d = this.nextDifficulty(d || this.initDifficulty(1, w), rating, w);
 
       if (rating === 1) {
         nextState = effectiveState;
@@ -287,26 +279,23 @@ export class FSRSScheduler {
       } else {
         nextState = 'review';
         nextRepetitions += 1;
-        const goodS = this.shortTermStability(card.stability || this.initStability(1), 3);
+        const goodS = this.shortTermStability(card.stability || this.initStability(1, w), 3, w);
         const goodIvl = Math.max(1, this.nextInterval(goodS, desiredRetention, maxIvl));
-        const easyIvl = this.nextInterval(Math.max(s, this.initStability(3)), desiredRetention, maxIvl);
+        const easyIvl = this.nextInterval(Math.max(s, this.initStability(3, w)), desiredRetention, maxIvl);
         nextIntervalDays = Math.min(maxIvl, Math.max(goodIvl + 2, easyIvl));
         nextDueDate = SM2Scheduler.addStudyDays(now, nextIntervalDays);
         nextDueText = `${nextIntervalDays}일`;
       }
     }
-    // =========================================================
-    // CASE C: FSRS 정규 장기 복습 카드 (review)
-    // =========================================================
+    // CASE C: 정규 장기 복습 (review)
     else {
       const r = this.forgettingCurve(elapsedDays, s);
       const prevS = s;
       const prevD = d;
-      d = this.nextDifficulty(prevD, rating);
+      d = this.nextDifficulty(prevD, rating, w);
 
       if (rating === 1) {
-        // 망각(Lapse) -> S'_f 계산 후 거머리 검사 및 단기 재학습 진입
-        s = this.nextForgetStability(prevD, prevS, r);
+        s = this.nextForgetStability(prevD, prevS, r, w);
         nextLapses += 1;
         nextRepetitions = 0;
 
@@ -323,13 +312,13 @@ export class FSRSScheduler {
         nextDueDate = new Date(now.getTime() + relearnMins * 60 * 1000);
         nextDueText = `${relearnMins}분`;
       } else {
-        s = this.nextRecallStability(prevD, prevS, r, rating);
+        s = this.nextRecallStability(prevD, prevS, r, rating, w);
         nextState = 'review';
         nextRepetitions += 1;
 
-        const sHard = this.nextRecallStability(prevD, prevS, r, 2);
-        const sGood = this.nextRecallStability(prevD, prevS, r, 3);
-        const sEasy = this.nextRecallStability(prevD, prevS, r, 4);
+        const sHard = this.nextRecallStability(prevD, prevS, r, 2, w);
+        const sGood = this.nextRecallStability(prevD, prevS, r, 3, w);
+        const sEasy = this.nextRecallStability(prevD, prevS, r, 4, w);
 
         const ivlHard = Math.min(maxIvl, Math.max(1, this.nextInterval(sHard, desiredRetention, maxIvl)));
         const ivlGood = Math.min(maxIvl, Math.max(ivlHard + 1, this.nextInterval(sGood, desiredRetention, maxIvl)));
@@ -344,7 +333,6 @@ export class FSRSScheduler {
       }
     }
 
-    // D(1~10)에 대응하는 표시용 easeFactor 동기화 (SM-2 모드로 전환 시 참조용)
     const syncedEase = Number(this.clamp(2.5 - (d - 5) * 0.15, 1.3, 3.0).toFixed(2));
 
     const updatedCard: Card = {
@@ -378,5 +366,196 @@ export class FSRSScheduler {
     };
 
     return { updatedCard, log, nextDueText };
+  }
+
+  // =========================================================================
+  // 🧠 FSRS 개인화 최적화기 (Log Loss 최소화 + 과적합 방지 + 개선 시에만 저장)
+  // =========================================================================
+
+  /**
+   * 카드별 학습 시퀀스 추출 (같은 KST 학습일 내 단기 반복은 제외하고 일 단위 복습만 추출)
+   */
+  private static buildCardSequences(
+    logs: ReviewLog[]
+  ): { firstRating: ReviewRating; steps: { elapsedDays: number; rating: ReviewRating }[] }[] {
+    const byCard = new Map<string, ReviewLog[]>();
+    for (const log of logs) {
+      if (!byCard.has(log.cardId)) byCard.set(log.cardId, []);
+      byCard.get(log.cardId)!.push(log);
+    }
+
+    const sequences: { firstRating: ReviewRating; steps: { elapsedDays: number; rating: ReviewRating }[] }[] = [];
+
+    for (const cardLogs of byCard.values()) {
+      const sorted = [...cardLogs].sort(
+        (a, b) => new Date(a.reviewDate).getTime() - new Date(b.reviewDate).getTime()
+      );
+      if (sorted.length < 2) continue;
+
+      const firstRating = sorted[0].rating;
+      let prevDayStart = SM2Scheduler.getKstStudyDayStart(new Date(sorted[0].reviewDate)).getTime();
+      const steps: { elapsedDays: number; rating: ReviewRating }[] = [];
+
+      for (let i = 1; i < sorted.length; i++) {
+        const currDayStart = SM2Scheduler.getKstStudyDayStart(new Date(sorted[i].reviewDate)).getTime();
+        const elapsedDays = Math.round((currDayStart - prevDayStart) / (24 * 60 * 60 * 1000));
+        if (elapsedDays >= 1) {
+          steps.push({ elapsedDays, rating: sorted[i].rating });
+          prevDayStart = currDayStart;
+        }
+      }
+
+      if (steps.length > 0) {
+        sequences.push({ firstRating, steps });
+      }
+    }
+
+    return sequences;
+  }
+
+  /**
+   * 최적화에 사용 가능한 유효 정규 복습 샘플 수 계산
+   */
+  public static countValidReviewSamples(logs: ReviewLog[]): number {
+    const seqs = this.buildCardSequences(logs);
+    return seqs.reduce((acc, seq) => acc + seq.steps.length, 0);
+  }
+
+  /**
+   * 순수 Log Loss(Binary Cross-Entropy) 계산
+   */
+  private static evaluateLogLoss(
+    sequences: { firstRating: ReviewRating; steps: { elapsedDays: number; rating: ReviewRating }[] }[],
+    w: number[]
+  ): { loss: number; count: number } {
+    let totalLoss = 0;
+    let count = 0;
+
+    for (const seq of sequences) {
+      let s = this.initStability(seq.firstRating, w);
+      let d = this.initDifficulty(seq.firstRating, w);
+
+      for (const step of seq.steps) {
+        const rawR = this.forgettingCurve(step.elapsedDays, s);
+        const r = this.clamp(rawR, 1e-6, 1 - 1e-6);
+        const y = step.rating === 1 ? 0 : 1;
+
+        totalLoss += -(y * Math.log(r) + (1 - y) * Math.log(1 - r));
+        count++;
+
+        d = this.nextDifficulty(d, step.rating, w);
+        s =
+          step.rating === 1
+            ? this.nextForgetStability(d, s, rawR, w)
+            : this.nextRecallStability(d, s, rawR, step.rating, w);
+      }
+    }
+
+    return {
+      loss: count > 0 ? totalLoss / count : Infinity,
+      count
+    };
+  }
+
+  /**
+   * 내 복습 로그 기반 FSRS 파라미터 최적화 실행
+   * - Log Loss가 기존 가중치보다 실제로 줄어들었을 때만 improved = true 반환
+   */
+  public static optimizeParameters(
+    logs: ReviewLog[],
+    currentWeights?: number[]
+  ): FsrsOptimizeResult {
+    const baselineWeights =
+      currentWeights && currentWeights.length === 19 ? [...currentWeights] : [...this.DEFAULT_WEIGHTS];
+    const sequences = this.buildCardSequences(logs);
+    const { loss: baselineLoss, count: sampleCount } = this.evaluateLogLoss(sequences, baselineWeights);
+
+    if (sampleCount === 0 || !Number.isFinite(baselineLoss)) {
+      return {
+        improved: false,
+        sampleCount: 0,
+        baselineLoss: 0,
+        optimizedLoss: 0,
+        weights: baselineWeights,
+        mode: 'pretrain'
+      };
+    }
+
+    // 100개 미만: 초기 안정성(w0~w3)만 안전하게 조정 (Pretrain)
+    // 100개 이상: 주요 장기 기억 가중치(w0~w16) 전체 최적화
+    const mode: 'pretrain' | 'full' = sampleCount < 100 ? 'pretrain' : 'full';
+    const activeIndices =
+      mode === 'pretrain' ? [0, 1, 2, 3] : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+    // 데이터가 적을수록 기본 가중치에서 너무 멀어지지 않도록 L2 정규화 강도 조절
+    const l2Penalty = sampleCount < 100 ? 0.01 : sampleCount < 500 ? 0.002 : 0.0005;
+
+    const w = [...baselineWeights];
+    const m = new Array(19).fill(0);
+    const v = new Array(19).fill(0);
+    const lr = 0.025;
+    const beta1 = 0.9;
+    const beta2 = 0.999;
+    const eps = 1e-8;
+    const fdEps = 1e-4;
+    const epochs = 60;
+
+    let bestWeights = [...w];
+    let bestPureLoss = baselineLoss;
+
+    const regularizedLoss = (weights: number[]): number => {
+      const { loss } = this.evaluateLogLoss(sequences, weights);
+      let reg = 0;
+      for (const idx of activeIndices) {
+        const diff = weights[idx] - this.DEFAULT_WEIGHTS[idx];
+        reg += diff * diff;
+      }
+      return loss + l2Penalty * reg;
+    };
+
+    for (let step = 1; step <= epochs; step++) {
+      const baseRegLoss = regularizedLoss(w);
+
+      for (const idx of activeIndices) {
+        const orig = w[idx];
+        w[idx] = orig + fdEps;
+        const lossPlus = regularizedLoss(w);
+        w[idx] = orig;
+
+        const grad = (lossPlus - baseRegLoss) / fdEps;
+        m[idx] = beta1 * m[idx] + (1 - beta1) * grad;
+        v[idx] = beta2 * v[idx] + (1 - beta2) * grad * grad;
+
+        const mHat = m[idx] / (1 - Math.pow(beta1, step));
+        const vHat = v[idx] / (1 - Math.pow(beta2, step));
+
+        const updated = orig - (lr * mHat) / (Math.sqrt(vHat) + eps);
+        const [minB, maxB] = this.PARAM_BOUNDS[idx];
+        w[idx] = this.clamp(updated, minB, maxB);
+      }
+
+      // 단조 증가 제약 보장: S0(Again) <= S0(Hard) <= S0(Good) <= S0(Easy)
+      w[1] = Math.max(w[0], w[1]);
+      w[2] = Math.max(w[1], w[2]);
+      w[3] = Math.max(w[2], w[3]);
+
+      const { loss: pureLoss } = this.evaluateLogLoss(sequences, w);
+      if (Number.isFinite(pureLoss) && pureLoss < bestPureLoss) {
+        bestPureLoss = pureLoss;
+        bestWeights = w.map(val => Number(val.toFixed(5)));
+      }
+    }
+
+    // 🔒 안전장치: 기존 가중치보다 Log Loss가 의미 있게 줄어들었을 때만 채택!
+    const improved = Number.isFinite(bestPureLoss) && bestPureLoss < baselineLoss - 1e-4;
+
+    return {
+      improved,
+      sampleCount,
+      baselineLoss: Number(baselineLoss.toFixed(4)),
+      optimizedLoss: Number((improved ? bestPureLoss : baselineLoss).toFixed(4)),
+      weights: improved ? bestWeights : baselineWeights,
+      mode
+    };
   }
 }

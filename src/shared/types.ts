@@ -52,6 +52,11 @@ export interface AnkiSettings {
   colorWordText?: string;
   colorMeaningText?: string;
   colorHighlightText?: string;
+
+  // FSRS 개인화 최적화 파라미터 (미설정 시 기본 가중치 사용)
+  fsrsWeights?: number[];
+  lastOptimizedAt?: string;
+  optimizedLogLoss?: number;
 }
 
 /**
